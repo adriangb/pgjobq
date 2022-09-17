@@ -93,12 +93,13 @@ async def test_concurrent_worker_pull_atomic_delivery(
 
             async def worker() -> None:
                 async for msg_handle in rcv.poll():
-                    async with msg_handle:
-                        events.append("received")
-                        # maybe let other worker grab job
-                        await anyio.sleep(ack_deadline * 1.25)
-                        events.append("done processing")
-                    events.append("acked")
+                    with anyio.CancelScope(shield=True):
+                        async with msg_handle:
+                            events.append("received")
+                            # maybe let other worker grab job
+                            await anyio.sleep(ack_deadline * 1.25)
+                            events.append("done processing")
+                        events.append("acked")
 
             tg.start_soon(worker)
             tg.start_soon(worker)
@@ -111,7 +112,10 @@ async def test_concurrent_worker_pull_atomic_delivery(
                     tg.cancel_scope.cancel()
 
         # we check that the message was only received and processed once
-        assert events == ["sent", "received", "done processing", "acked", "completed"]
+        assert events in (
+            ["sent", "received", "done processing", "acked", "completed"],
+            ["sent", "received", "done processing", "completed", "acked"],
+        )
 
 
 @pytest.mark.anyio

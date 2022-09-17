@@ -121,54 +121,50 @@ class Receive:
             async def cm(job_record: Mapping[str, Any] = job) -> AsyncIterator[Message]:
                 message = Message(id=job_record["id"], body=job_record["body"])
                 next_ack_deadline: datetime = job_record["next_ack_deadline"]
-                try:
-                    async with AsyncExitStack() as stack:
-                        msg_tg = await stack.enter_async_context(
-                            anyio.create_task_group()
+                job_conn: asyncpg.Connection
+                async with self._pool.acquire() as job_conn:  # type: ignore
+                    try:
+                        async with anyio.create_task_group() as msg_tg:
+
+                            async def extend_ack_deadline(
+                                *, task_status: TaskStatus = anyio.TASK_STATUS_IGNORED
+                            ) -> None:
+                                nonlocal next_ack_deadline
+                                task_status.started()
+                                # min ack deadline is 1 sec so 0.5 is a reasonable lower bound
+                                delay = max(
+                                    (
+                                        datetime.now()
+                                        - next_ack_deadline
+                                        - timedelta(seconds=1)
+                                    ).total_seconds(),
+                                    0.5,
+                                )
+                                await anyio.sleep(delay)
+                                next_ack_deadline = await job_conn.fetchval(  # type: ignore
+                                    "SELECT pgjobq.extend_ack_deadline($1, $2)",
+                                    self._queue_name,
+                                    message.id,
+                                )
+                                msg_tg.start_soon(extend_ack_deadline)
+
+                            await msg_tg.start(extend_ack_deadline)
+
+                            yield message
+                            with anyio.CancelScope(shield=True):
+                                msg_tg.cancel_scope.cancel()
+                                await job_conn.execute(  # type: ignore
+                                    "SELECT pgjobq.ack_message($1, $2)",
+                                    self._queue_name,
+                                    message.id,
+                                )
+                    except Exception:
+                        await job_conn.execute(  # type: ignore
+                            "SELECT pgjobq.nack_message($1, $2)",
+                            self._queue_name,
+                            message.id,
                         )
-                        job_conn: "asyncpg.Connection" = await stack.enter_async_context(
-                            self._pool.acquire()  # type: ignore
-                        )
-
-                        async def extend_ack_deadline(
-                            *, task_status: TaskStatus = anyio.TASK_STATUS_IGNORED
-                        ) -> None:
-                            nonlocal next_ack_deadline
-                            task_status.started()
-                            # min ack deadline is 1 sec so 0.5 is a reasonable lower bound
-                            delay = max(
-                                (
-                                    datetime.now()
-                                    - next_ack_deadline
-                                    - timedelta(seconds=1)
-                                ).total_seconds(),
-                                0.5,
-                            )
-                            await anyio.sleep(delay)
-                            next_ack_deadline = await job_conn.fetchval(  # type: ignore
-                                "SELECT pgjobq.extend_ack_deadline($1, $2)",
-                                self._queue_name,
-                                message.id,
-                            )
-                            msg_tg.start_soon(extend_ack_deadline)
-
-                        await msg_tg.start(extend_ack_deadline)
-
-                        yield message
-                        with anyio.CancelScope(shield=True):
-                            msg_tg.cancel_scope.cancel()
-                            await job_conn.execute(  # type: ignore
-                                "SELECT pgjobq.ack_message($1, $2)",
-                                self._queue_name,
-                                message.id,
-                            )
-                except Exception:
-                    await self._pool.execute(  # type: ignore
-                        "SELECT pgjobq.nack_message($1, $2)",
-                        self._queue_name,
-                        message.id,
-                    )
-                    raise
+                        raise
 
             yield cm()
 
