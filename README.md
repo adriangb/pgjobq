@@ -14,6 +14,8 @@ Possible features:
 * FIFO delivery
 * Bulk sending
 * Exponential backoffs
+* Scheduled jobs
+* Maybe more efficient continuous polling?
 
 Unplanned features:
 * Sending back response data (currently it needs to be sent out of band)
