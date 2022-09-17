@@ -4,7 +4,7 @@ A job queue built on top of Postgres.
 
 ## Features
 
-* Best effort most once delivery
+* Best effort at most once delivery (jobs are only delivered to one worker at a time)
 * FIFO delivery for non-retried jobs
 * Automatic redelivery of failed jobs
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
