@@ -10,6 +10,7 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Dict,
     Mapping,
     Optional,
     Sequence,
@@ -21,10 +22,9 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskStatus
 
-if sys.version_info < (3, 10):  # pragma: no cover
-    KW = {}
-else:
-    KW = {"slots": True}
+KW: Dict[str, Any] = {}
+if sys.version_info > (3, 10):  # pragma: no cover
+    KW["slots"] = True
 
 
 @dataclass(frozen=True, **KW)
