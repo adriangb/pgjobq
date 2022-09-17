@@ -22,7 +22,7 @@ create table pgjobq.messages (
     PRIMARY KEY(queue_id, id),
     expires_at timestamp not null,
     delivery_attempts_remaining integer not null,
-    next_ack_deadline timestamp not null,
+    available_at timestamp not null,
     body bytea not null
 ) PARTITION BY LIST(queue_id);
 
@@ -35,9 +35,9 @@ CREATE INDEX delivery_attempt_idx
 ON pgjobq.messages(delivery_attempts_remaining)
 WHERE delivery_attempts_remaining = 0;
 
-CREATE INDEX next_ack_deadline_idx
+CREATE INDEX available_at_idx
 ON pgjobq.messages
-USING BRIN(next_ack_deadline);
+USING BRIN(available_at);
 
 CREATE FUNCTION pgjobq.create_queue(
     queue_name varchar(32),
@@ -107,7 +107,7 @@ $$
         id,
         expires_at,
         delivery_attempts_remaining,
-        next_ack_deadline,
+        available_at,
         body
     )
     SELECT
@@ -131,7 +131,7 @@ $$
     DELETE
     FROM pgjobq.messages
     WHERE (
-        next_ack_deadline < now()
+        available_at < now()
         AND (
             expires_at < now()
             OR
@@ -162,7 +162,7 @@ $$
             AND
             expires_at > now()
             AND
-            next_ack_deadline < now()
+            available_at < now()
             AND
             queue_id = (SELECT id FROM queue_info)
         )
@@ -171,11 +171,11 @@ $$
     )
     UPDATE pgjobq.messages
     SET
-        next_ack_deadline = now() + (SELECT ack_deadline FROM queue_info),
+        available_at = now() + (SELECT ack_deadline FROM queue_info),
         delivery_attempts_remaining = delivery_attempts_remaining - 1
     FROM selected_messages
     WHERE pgjobq.messages.id = selected_messages.id
-    RETURNING pgjobq.messages.id, next_ack_deadline, body
+    RETURNING pgjobq.messages.id, available_at AS next_ack_deadline, body
 END
 $$;
 
@@ -207,7 +207,7 @@ $$
         FOR UPDATE SKIP LOCKED
     )
     UPDATE pgjobq.messages
-    SET next_ack_deadline = (
+    SET available_at = (
         now() + (
             SELECT ack_deadline
             FROM pgjobq.queues
@@ -219,7 +219,7 @@ $$
     WHERE pgjobq.messages.id = (
         SELECT id FROM message_for_update
     )
-    RETURNING next_ack_deadline;
+    RETURNING available_at AS next_ack_deadline;
 $$;
 
 CREATE FUNCTION pgjobq.nack_message(
@@ -230,6 +230,6 @@ CREATE FUNCTION pgjobq.nack_message(
     LANGUAGE sql AS
 $$
     UPDATE pgjobq.messages
-    SET next_ack_deadline = now()
+    SET available_at = now()
     WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
 $$;
