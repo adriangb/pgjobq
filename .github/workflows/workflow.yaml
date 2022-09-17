@@ -58,14 +58,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
-      - uses: actions/setup-java@v3  # for pubsub emulator
-        with:
-          java-version: "17"
-          distribution: "temurin"
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v0'
-        with:
-          install_components: "alpha,beta,pubsub-emulator"
       - name: Test
         run: make test
       - name: Export Coverage Report
