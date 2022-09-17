@@ -65,4 +65,10 @@ if __name__ == "__main__":
     # "completed"
 ```
 
+## Development
+
+1. Clone the repo
+2. Start a disposable PostgreSQL instance (e.g `docker run -it -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres`)
+3. Run `make test`
+
 [asyncpg]: https://github.com/MagicStack/asyncpg
