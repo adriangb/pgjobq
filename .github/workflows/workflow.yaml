@@ -1,0 +1,132 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Run Linters
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.7", "3.8", "3.9", "3.10"]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install and configure Poetry
+        uses: snok/install-poetry@v1.3.1
+      - name: Lint
+        run: make lint
+  test:
+    name: Run Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # test python versions
+          - python: "3.7"
+            os: ubuntu-latest
+          - python: "3.8"
+            os: ubuntu-latest
+          - python: "3.9"
+            os: ubuntu-latest
+          - python: "3.10"
+            os: ubuntu-latest
+          # test OSs
+          - python: "3.x"
+            os: macos-latest
+          - python: "3.x"
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install and configure Poetry
+        uses: snok/install-poetry@v1.3.1
+      - uses: actions/setup-java@v3  # for pubsub emulator
+        with:
+          java-version: "17"
+          distribution: "temurin"
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v0'
+        with:
+          install_components: "alpha,beta,pubsub-emulator"
+      - name: Test
+        run: make test
+      - name: Export Coverage Report
+        run: |
+          poetry run pip install "coverage[toml]"
+          poetry run coverage xml
+      - name: Upload code coverage
+        uses: codecov/codecov-action@v2.1.0
+        with:
+          file: ./coverage.xml
+          env_vars: OS,PYTHON
+          fail_ci_if_error: true
+  version-check:
+    name: Check Version Bump
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: current
+      - uses: actions/checkout@v2
+        with:
+          ref: main
+          path: main
+      - name: Install and configure Poetry
+        uses: snok/install-poetry@v1.3.0
+      - name: Check version bump
+        run: |
+          cd $GITHUB_WORKSPACE/current
+          NEW_VERSION=$(poetry version -s)
+          cd $GITHUB_WORKSPACE/main
+          OLD_VERSION=$(poetry version -s)
+          python -c "from packaging import version;assert version.parse(\"${NEW_VERSION}\") > version.parse(\"${OLD_VERSION}\"), \"❌ Bad version bump detected: you must bump the version in pyproject.toml\""
+          python -c "print(\"✅ Version will be bumped from ${OLD_VERSION} to ${NEW_VERSION}\")"
+  pypi:
+    if: github.ref == 'refs/heads/main'
+    name: 🚀 PyPi Release 📦
+    runs-on: ubuntu-latest
+    needs: ["test", "lint"]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+      - name: Install and configure Poetry
+        uses: snok/install-poetry@v1.3.0
+      - name: Release on PyPi
+        continue-on-error: true  # allow pushes to main that don't release
+        id: pypi
+        run: |
+          PACKAGE_VERSION=$(poetry version -s)
+          echo "package_version=$PACKAGE_VERSION" >> $GITHUB_ENV
+          printf "\nSee this release on GitHub: [v$PACKAGE_VERSION](https://github.com/$GITHUB_REPOSITORY/releases/tag/$PACKAGE_VERSION)\n" >> README.md
+          poetry config pypi-token.pypi "${{ secrets.PYPI_TOKEN }}"
+          poetry publish --build
+      - name: 🚀 Create GitHub Release 😺
+        uses: ncipollo/release-action@v1
+        if: steps.pypi.outcome == 'success'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ env.package_version }}
+          generateReleaseNotes: true
