@@ -1,6 +1,6 @@
 from datetime import timedelta
 from time import time
-from typing import AsyncGenerator, List, Tuple
+from typing import AsyncContextManager, AsyncGenerator, List, Tuple
 
 import anyio
 import asyncpg  # type: ignore
@@ -51,6 +51,31 @@ async def test_worker_raises_exception(
         async for msg_handle in rcv.poll(batch_size=1):
             async with msg_handle as msg:
                 assert msg.body == b'{"foo":"bar"}', msg.body
+
+
+@pytest.mark.anyio
+async def test_execute_jobs_concurrently(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+    ack_deadline = 1
+    await create_queue(
+        "test-queue", migrated_pool, ack_deadline=timedelta(seconds=ack_deadline)
+    )
+
+    async def fake_job_work(msg_handle: AsyncContextManager[None]) -> None:
+        async with msg_handle:
+            await anyio.sleep(0.25)
+
+    async with connect_to_queue("test-queue", migrated_pool) as (send, rcv):
+
+        for _ in range(10):
+            async with send.send(b"{}"):
+                pass
+
+        with anyio.fail_after(1):
+            async with anyio.create_task_group() as worker_tg:
+                async for msg_handle in rcv.poll(batch_size=10):
+                    worker_tg.start_soon(fake_job_work, msg_handle)
 
 
 @pytest.mark.anyio
@@ -112,7 +137,10 @@ async def test_completion_handle_awaited(
             await completion_handle()
             events.append("completed")
 
-    assert events == ["sent", "received", "acked", "completed"]
+    assert events in (
+        ["sent", "received", "completed", "acked"],
+        ["sent", "received", "acked", "completed"],
+    )
 
 
 @pytest.mark.anyio

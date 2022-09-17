@@ -75,12 +75,12 @@ class Receive:
         """
         listener_channel = f"new_message_{self._queue_name}"
         async with AsyncExitStack() as stack:
-            conn: "asyncpg.Connection" = await stack.enter_async_context(
+            jobs_conn: "asyncpg.Connection" = await stack.enter_async_context(
                 self._pool.acquire()  # type: ignore
             )
 
             async def get_jobs() -> Sequence[Mapping[str, Any]]:
-                return await conn.fetch(  # type: ignore
+                return await jobs_conn.fetch(  # type: ignore
                     "SELECT * FROM pgjobq.poll_for_messages($1::text, $2::smallint)",
                     self._queue_name,
                     batch_size,
@@ -94,12 +94,12 @@ class Receive:
                 async def skip_forward_if_new_msg(*_: Any) -> None:
                     new_job.set()
 
-                await conn.add_listener(  # type: ignore
+                await jobs_conn.add_listener(  # type: ignore
                     listener_channel, skip_forward_if_new_msg
                 )
 
                 stack.push_async_callback(
-                    conn.remove_listener,  # type: ignore
+                    jobs_conn.remove_listener,  # type: ignore
                     listener_channel,
                     skip_forward_if_new_msg,
                 )
@@ -115,15 +115,20 @@ class Receive:
 
                 jobs = await get_jobs()
 
-            for job in jobs:
+        for job in jobs:
 
-                @asynccontextmanager
-                async def cm(
-                    job_record: Mapping[str, Any] = job
-                ) -> AsyncIterator[Message]:
-                    message = Message(id=job_record["id"], body=job_record["body"])
-                    next_ack_deadline: datetime = job_record["next_ack_deadline"]
-                    async with anyio.create_task_group() as msg_tg:
+            @asynccontextmanager
+            async def cm(job_record: Mapping[str, Any] = job) -> AsyncIterator[Message]:
+                message = Message(id=job_record["id"], body=job_record["body"])
+                next_ack_deadline: datetime = job_record["next_ack_deadline"]
+                try:
+                    async with AsyncExitStack() as stack:
+                        msg_tg = await stack.enter_async_context(
+                            anyio.create_task_group()
+                        )
+                        job_conn: "asyncpg.Connection" = await stack.enter_async_context(
+                            self._pool.acquire()  # type: ignore
+                        )
 
                         async def extend_ack_deadline(
                             *, task_status: TaskStatus = anyio.TASK_STATUS_IGNORED
@@ -140,7 +145,7 @@ class Receive:
                                 0.5,
                             )
                             await anyio.sleep(delay)
-                            next_ack_deadline = await conn.fetchval(  # type: ignore
+                            next_ack_deadline = await job_conn.fetchval(  # type: ignore
                                 "SELECT pgjobq.extend_ack_deadline($1, $2)",
                                 self._queue_name,
                                 message.id,
@@ -149,26 +154,23 @@ class Receive:
 
                         await msg_tg.start(extend_ack_deadline)
 
-                        try:
-                            yield message
-                            with anyio.CancelScope(shield=True):
-                                msg_tg.cancel_scope.cancel()
-                                await conn.execute(  # type: ignore
-                                    "SELECT pgjobq.ack_message($1, $2)",
-                                    self._queue_name,
-                                    message.id,
-                                )
-                        except Exception:
-                            await conn.execute(  # type: ignore
-                                "SELECT pgjobq.nack_message($1, $2)",
+                        yield message
+                        with anyio.CancelScope(shield=True):
+                            msg_tg.cancel_scope.cancel()
+                            await job_conn.execute(  # type: ignore
+                                "SELECT pgjobq.ack_message($1, $2)",
                                 self._queue_name,
                                 message.id,
                             )
-                            raise
-                        finally:
-                            msg_tg.cancel_scope.cancel()
+                except Exception:
+                    await self._pool.execute(  # type: ignore
+                        "SELECT pgjobq.nack_message($1, $2)",
+                        self._queue_name,
+                        message.id,
+                    )
+                    raise
 
-                yield cm()
+            yield cm()
 
 
 WaitForDoneHandle = Callable[[], Awaitable[None]]
