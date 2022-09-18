@@ -84,7 +84,8 @@ $$;
 CREATE FUNCTION pgjobq.publish_message(
     text, -- queue name
     uuid, -- id
-    bytea -- body
+    bytea, -- body
+    delay interval
 )
     RETURNS int
     LANGUAGE 'sql' AS
@@ -117,7 +118,7 @@ $$
         max_delivery_attempts,
         -- set next ack to now
         -- somewhat meaningless but avoids nulls
-        now(),
+        now() + delay,
         $3
     FROM queue_info
     LEFT JOIN published_notification ON 1 = 1

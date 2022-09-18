@@ -119,6 +119,26 @@ async def test_concurrent_worker_pull_atomic_delivery(
 
 
 @pytest.mark.anyio
+async def test_enqueue_with_delay(
+    send_rcv_pair: SendRcv,
+) -> None:
+    send, rcv = send_rcv_pair
+    async with send.send(b'{"foo":"bar"}', delay=timedelta(seconds=1)):
+        pass
+
+    with anyio.move_on_after(0.5):
+        async for _ in rcv.poll():
+            assert False, "should not be called"
+
+    await anyio.sleep(0.5)
+
+    with anyio.fail_after(0.1):
+        async for msg_handle in rcv.poll():
+            async with msg_handle as msg:
+                assert msg.body == b'{"foo":"bar"}', msg.body
+
+
+@pytest.mark.anyio
 async def test_completion_handle_awaited(
     send_rcv_pair: SendRcv,
 ) -> None:

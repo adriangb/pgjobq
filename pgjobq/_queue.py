@@ -182,7 +182,9 @@ class Send:
         self._pool = pool
         self._queue_name = queue_name
 
-    def send(self, body: bytes) -> AsyncContextManager[WaitForDoneHandle]:
+    def send(
+        self, body: bytes, *, delay: Optional[timedelta] = None
+    ) -> AsyncContextManager[WaitForDoneHandle]:
         """Put a job on the queue.
 
         You _must_ enter the context manager but awaiting the completion
@@ -214,10 +216,11 @@ class Send:
 
                 try:
                     res: "Optional[int]" = await conn.fetchval(  # type: ignore
-                        "SELECT pgjobq.publish_message($1, $2, $3)",
+                        "SELECT pgjobq.publish_message($1, $2, $3, $4)",
                         self._queue_name,
                         job_id,
                         body,
+                        delay or timedelta(seconds=0),
                     )
                     if res is None:
                         raise LookupError("Queue not found, call create_queue() first")
