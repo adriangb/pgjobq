@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections import defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -11,9 +12,10 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    Hashable,
     Mapping,
     Optional,
-    Sequence,
+    Set,
     Tuple,
 )
 from uuid import UUID, uuid4
@@ -21,6 +23,14 @@ from uuid import UUID, uuid4
 import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskStatus
+
+from pgjobq.sql._functions import (
+    ack_message,
+    extend_ack_deadline,
+    nack_message,
+    poll_for_messages,
+    publish_messages,
+)
 
 KW: Dict[str, Any] = {}
 if sys.version_info > (3, 10):  # pragma: no cover
@@ -47,6 +57,7 @@ class Receive:
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
+        fifo: bool = False,
     ) -> AsyncIterator[AsyncContextManager[Message]]:
         """Poll for a batch of jobs.
 
@@ -79,14 +90,12 @@ class Receive:
                 self._pool.acquire()  # type: ignore
             )
 
-            async def get_jobs() -> Sequence[Mapping[str, Any]]:
-                return await jobs_conn.fetch(  # type: ignore
-                    "SELECT * FROM pgjobq.poll_for_messages($1::text, $2::smallint)",
-                    self._queue_name,
-                    batch_size,
-                )
-
-            jobs = await get_jobs()
+            jobs = await poll_for_messages(
+                jobs_conn,
+                queue_name=self._queue_name,
+                fifo=fifo,
+                batch_size=batch_size,
+            )
             while not jobs:
                 new_job = anyio.Event()
                 # wait for a new job to be published or the poll interval to expire
@@ -113,7 +122,12 @@ class Receive:
                     await new_job.wait()
                     tg.cancel_scope.cancel()
 
-                jobs = await get_jobs()
+                jobs = await poll_for_messages(
+                    jobs_conn,
+                    queue_name=self._queue_name,
+                    fifo=fifo,
+                    batch_size=batch_size,
+                )
 
         for job in jobs:
 
@@ -126,7 +140,7 @@ class Receive:
                     try:
                         async with anyio.create_task_group() as msg_tg:
 
-                            async def extend_ack_deadline(
+                            async def extend_ack(
                                 *, task_status: TaskStatus = anyio.TASK_STATUS_IGNORED
                             ) -> None:
                                 nonlocal next_ack_deadline
@@ -141,26 +155,26 @@ class Receive:
                                     0.5,
                                 )
                                 await anyio.sleep(delay)
-                                next_ack_deadline = await job_conn.fetchval(  # type: ignore
-                                    "SELECT pgjobq.extend_ack_deadline($1, $2)",
+                                next_ack_deadline = await extend_ack_deadline(
+                                    job_conn,
                                     self._queue_name,
                                     message.id,
                                 )
-                                msg_tg.start_soon(extend_ack_deadline)
+                                msg_tg.start_soon(extend_ack)
 
-                            await msg_tg.start(extend_ack_deadline)
+                            await msg_tg.start(extend_ack)
 
                             yield message
                             with anyio.CancelScope(shield=True):
                                 msg_tg.cancel_scope.cancel()
-                                await job_conn.execute(  # type: ignore
-                                    "SELECT pgjobq.ack_message($1, $2)",
+                                await ack_message(
+                                    job_conn,
                                     self._queue_name,
                                     message.id,
                                 )
                     except Exception:
-                        await job_conn.execute(  # type: ignore
-                            "SELECT pgjobq.nack_message($1, $2)",
+                        await nack_message(
+                            job_conn,
                             self._queue_name,
                             message.id,
                         )
@@ -178,9 +192,11 @@ class Send:
         *,
         pool: asyncpg.Pool,
         queue_name: str,
+        completion_callbacks: Dict[str, Dict[Hashable, Callable[[], Awaitable[None]]]],
     ) -> None:
         self._pool = pool
         self._queue_name = queue_name
+        self._completion_callbacks = completion_callbacks
 
     def send(
         self, body: bytes, *, delay: Optional[timedelta] = None
@@ -200,35 +216,30 @@ class Send:
         # create the job id application side
         # so that we can start listening before we send
         job_id = uuid4()
-        done_listener_channel = f"done_{self._queue_name}_{job_id}"
 
         @asynccontextmanager
         async def cm() -> AsyncIterator[WaitForDoneHandle]:
             conn: asyncpg.Connection
             async with self._pool.acquire() as conn:  # type: ignore
 
-                async def handle_done_notification(*_: Any) -> None:
+                async def handle_done_notification() -> None:
                     done.set()
 
-                await conn.add_listener(  # type: ignore
-                    done_listener_channel, handle_done_notification
-                )
+                self._completion_callbacks[self._queue_name][
+                    job_id
+                ] = handle_done_notification
 
                 try:
-                    res: "Optional[int]" = await conn.fetchval(  # type: ignore
-                        "SELECT pgjobq.publish_message($1, $2, $3, $4)",
-                        self._queue_name,
-                        job_id,
-                        body,
-                        delay or timedelta(seconds=0),
+                    await publish_messages(
+                        conn,
+                        queue_name=self._queue_name,
+                        message_id=job_id,
+                        message_body=body,
+                        delay=delay,
                     )
-                    if res is None:
-                        raise LookupError("Queue not found, call create_queue() first")
                     yield done.wait
                 finally:
-                    await conn.remove_listener(  # type: ignore
-                        done_listener_channel, handle_done_notification
-                    )
+                    self._completion_callbacks[self._queue_name].pop(job_id)
 
         return cm()
 
@@ -238,19 +249,76 @@ async def connect_to_queue(
     queue_name: str,
     pool: asyncpg.Pool,
 ) -> AsyncIterator[Tuple[Send, Receive]]:
-    send = Send(pool=pool, queue_name=queue_name)
-    rcv = Receive(pool=pool, queue_name=queue_name)
-    async with anyio.create_task_group() as tg:
+    completion_callbacks: Dict[
+        str, Dict[Hashable, Callable[[], Awaitable[None]]]
+    ] = defaultdict(dict)
+    new_message_callbacks: Dict[str, Set[Callable[[], Awaitable[None]]]] = defaultdict(
+        set
+    )
 
-        async def cleanup_cb() -> None:
-            while True:
-                await pool.execute(  # type: ignore
-                    "SELECT pgjobq.cleanup_dead_messages()",
-                )
-                await anyio.sleep(1)
+    background_conn: asyncpg.Connection
+    background_conn_lock = anyio.Lock()
+    async with pool.acquire() as background_conn:  # type: ignore
+        async with anyio.create_task_group() as tg:
 
-        tg.start_soon(cleanup_cb)
+            async def cleanup_cb() -> None:
+                while True:
+                    async with background_conn_lock:
+                        await background_conn.execute(  # type: ignore
+                            "SELECT pgjobq.cleanup_dead_messages()",
+                        )
+                    await anyio.sleep(1)
 
-        yield send, rcv
+            async def process_completion_notification(
+                conn: asyncpg.Connection,
+                pid: int,
+                channel: str,
+                payload: str,
+            ) -> None:
+                queue_name, message_id = payload.split(",", maxsplit=1)
+                cb = completion_callbacks[queue_name].get(UUID(message_id), None)
+                if cb is not None:
+                    await cb()
 
-        tg.cancel_scope.cancel()
+            async def process_new_job_notification(
+                conn: asyncpg.Connection,
+                pid: int,
+                channel: str,
+                payload: str,
+            ) -> None:
+                queue_name = payload
+                for cb in new_message_callbacks[queue_name]:
+                    await cb()
+
+            await background_conn.add_listener(  # type: ignore
+                channel="pgjobq.job_completed",
+                callback=process_completion_notification,
+            )
+
+            await background_conn.add_listener(  # type: ignore
+                channel="pgjobq.new_job",
+                callback=process_new_job_notification,
+            )
+
+            tg.start_soon(cleanup_cb)
+
+            send = Send(
+                pool=pool,
+                queue_name=queue_name,
+                completion_callbacks=completion_callbacks,
+            )
+            rcv = Receive(pool=pool, queue_name=queue_name)
+
+            try:
+                yield send, rcv
+            finally:
+                async with background_conn_lock:
+                    await background_conn.remove_listener(  # type: ignore
+                        channel="pgjobq.new_job",
+                        callback=process_new_job_notification,
+                    )
+                    await background_conn.remove_listener(  # type: ignore
+                        channel="pgjobq.job_completed",
+                        callback=process_completion_notification,
+                    )
+                tg.cancel_scope.cancel()

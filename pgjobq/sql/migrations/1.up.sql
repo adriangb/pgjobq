@@ -52,7 +52,7 @@ DECLARE
     found_queue_id integer;
     messages_partition_table_name text;
 BEGIN
-    messages_partition_table_name := 'pgjobq.messages_' || queue_name;
+    messages_partition_table_name := 'pgjobq.messages_' || quote_literal(queue_name);
     WITH new_queue AS (
         INSERT INTO pgjobq.queues(name, ack_deadline, max_delivery_attempts, retention_period)
         VALUES (queue_name, ack_deadline, max_delivery_attempts, retention_period)
@@ -139,98 +139,4 @@ $$
             delivery_attempts_remaining = 0
         )
     );
-$$;
-
-CREATE FUNCTION pgjobq.poll_for_messages(
-    text, -- queue name
-    smallint -- batch_size
-)
-    RETURNS table(id uuid, next_ack_deadline timestamp, body bytea)
-    LANGUAGE sql AS
-$$
-    WITH queue_info AS (
-        SELECT
-            id,
-            ack_deadline
-        FROM pgjobq.queues
-        WHERE name = $1
-    ), selected_messages AS (
-        SELECT
-            id
-        FROM pgjobq.messages
-        WHERE (
-            delivery_attempts_remaining != 0
-            AND
-            expires_at > now()
-            AND
-            available_at < now()
-            AND
-            queue_id = (SELECT id FROM queue_info)
-        )
-        FOR UPDATE SKIP LOCKED
-        LIMIT $2
-    )
-    UPDATE pgjobq.messages
-    SET
-        available_at = now() + (SELECT ack_deadline FROM queue_info),
-        delivery_attempts_remaining = delivery_attempts_remaining - 1
-    FROM selected_messages
-    WHERE pgjobq.messages.id = selected_messages.id
-    RETURNING pgjobq.messages.id, available_at AS next_ack_deadline, body
-END
-$$;
-
-CREATE FUNCTION pgjobq.ack_message(
-    text, -- queue name
-    uuid -- id
-)
-    RETURNS VOID
-    LANGUAGE sql AS
-$$
-    SELECT * FROM pg_notify('done_' || $1::text || '_' || $2::text, '{}');
-    DELETE FROM pgjobq.messages
-    WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
-$$;
-
-CREATE FUNCTION pgjobq.extend_ack_deadline(
-    text, -- queue name
-    uuid -- id
-)
-    RETURNS timestamp
-    LANGUAGE sql AS
-$$
-    WITH message_for_update AS (
-        SELECT
-            id,
-            queue_id
-        FROM pgjobq.messages
-        WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
-        FOR UPDATE SKIP LOCKED
-    )
-    UPDATE pgjobq.messages
-    SET available_at = (
-        now() + (
-            SELECT ack_deadline
-            FROM pgjobq.queues
-            WHERE pgjobq.queues.id = (
-                SELECT queue_id FROM message_for_update
-            )
-        )
-    )
-    WHERE pgjobq.messages.id = (
-        SELECT id FROM message_for_update
-    )
-    RETURNING available_at AS next_ack_deadline;
-$$;
-
-CREATE FUNCTION pgjobq.nack_message(
-    text, -- queue name
-    uuid -- id
-)
-    RETURNS VOID
-    LANGUAGE sql AS
-$$
-    UPDATE pgjobq.messages
-    SET available_at = now()
-    WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
 $$;

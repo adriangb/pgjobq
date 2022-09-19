@@ -9,15 +9,17 @@ A job queue built on top of Postgres.
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Completion tracking (using `NOTIFY`)
 * Fully typed async Python client (using [asyncpg])
+* Optional FIFO queuing
+* Persistent scheduled jobs (scheduled in the database, not the client application)
 
 Possible features:
-* FIFO delivery
+
 * Bulk sending
 * Exponential backoffs
-* Scheduled jobs
 * Maybe more efficient continuous polling?
 
 Unplanned features:
+
 * Sending back response data (currently it needs to be sent out of band)
 * Supporting "subscriptions" (this is a simple queue, not a message broker)
 

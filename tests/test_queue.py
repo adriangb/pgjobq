@@ -139,6 +139,26 @@ async def test_enqueue_with_delay(
 
 
 @pytest.mark.anyio
+async def test_pull_fifo(
+    send_rcv_pair: SendRcv,
+) -> None:
+    send, rcv = send_rcv_pair
+    async with send.send(b"1"):
+        pass
+
+    async with send.send(b"2"):
+        pass
+
+    async for msg_handle in rcv.poll():
+        async with msg_handle as msg:
+            assert msg.body == b"1"
+
+    async for msg_handle in rcv.poll():
+        async with msg_handle as msg:
+            assert msg.body == b"2"
+
+
+@pytest.mark.anyio
 async def test_completion_handle_awaited(
     send_rcv_pair: SendRcv,
 ) -> None:
