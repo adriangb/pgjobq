@@ -23,6 +23,7 @@ WITH queue_info AS (
 )
 INSERT INTO pgjobq.messages(
     queue_id,
+    batch_id,
     id,
     expires_at,
     delivery_attempts_remaining,
@@ -32,12 +33,13 @@ INSERT INTO pgjobq.messages(
 SELECT
     queue_id,
     $2,
+    unnest($3::uuid[]),
     now() + retention_period,
     max_delivery_attempts,
     -- set next ack to now
     -- somewhat meaningless but avoids nulls
-    now() + COALESCE($4, '0 seconds'::interval),
-    $3
+    now() + COALESCE($5, '0 seconds'::interval),
+    unnest($4::bytea[])
 FROM queue_info
 LEFT JOIN published_notification ON 1 = 1
 RETURNING 1;  -- NULL if the queue doesn't exist
@@ -48,15 +50,17 @@ async def publish_messages(
     conn: PoolOrConnection,
     *,
     queue_name: str,
-    message_id: UUID,
-    message_body: bytes,
+    batch_id: UUID,
+    message_ids: List[UUID],
+    message_bodies: List[bytes],
     delay: Optional[timedelta],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
         PUBLISH_MESSAGES,
         queue_name,
-        message_id,
-        message_body,
+        batch_id,
+        message_ids,
+        message_bodies,
         delay,
     )
     if res is None:
@@ -91,8 +95,7 @@ UPDATE pgjobq.messages
 SET
     available_at = now() + (SELECT ack_deadline FROM queue_info),
     delivery_attempts_remaining = delivery_attempts_remaining - 1
-FROM selected_messages
-WHERE pgjobq.messages.id = selected_messages.id
+WHERE pgjobq.messages.id IN (SELECT id FROM selected_messages)
 RETURNING pgjobq.messages.id AS id, available_at AS next_ack_deadline, body
 """
 
@@ -123,10 +126,17 @@ async def poll_for_messages(
 
 ACK_MESSAGE = """\
 WITH msg AS (
+    SELECT
+        id,
+        batch_id
+    FROM pgjobq.messages
+    WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid
+), msg_notification AS (
     SELECT pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
 )
-DELETE FROM pgjobq.messages
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid AND 1 = (SELECT 1 FROM msg);
+DELETE
+FROM pgjobq.messages
+WHERE pgjobq.messages.id = (SELECT id FROM msg) AND 1 = (SELECT 1 FROM msg_notification);
 """
 
 
@@ -159,8 +169,9 @@ async def nack_message(
 EXTEND_ACK_DEADLINE = """\
 WITH message_for_update AS (
     SELECT
+        queue_id,
         id,
-        queue_id
+        available_at
     FROM pgjobq.messages
     WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
     FOR UPDATE SKIP LOCKED
@@ -175,9 +186,7 @@ SET available_at = (
         )
     )
 )
-WHERE pgjobq.messages.id = (
-    SELECT id FROM message_for_update
-)
+WHERE pgjobq.messages.id = (SELECT id FROM message_for_update)
 RETURNING available_at AS next_ack_deadline;
 """
 
@@ -187,4 +196,8 @@ async def extend_ack_deadline(
     queue_name: str,
     job_id: UUID,
 ) -> datetime:
-    return await conn.fetchval(EXTEND_ACK_DEADLINE, queue_name, job_id)  # type: ignore
+    res: Optional[datetime] = await conn.fetchval(EXTEND_ACK_DEADLINE, queue_name, job_id)  # type: ignore
+    if res is None:
+        # message was acked while we were making the query
+        raise LookupError
+    return res

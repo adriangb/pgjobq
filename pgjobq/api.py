@@ -1,20 +1,19 @@
+from __future__ import annotations
+
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import (
-    Any,
-    AsyncContextManager,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Dict,
-    Optional,
-)
+from typing import Any, AsyncContextManager, Awaitable, Callable, Dict, Optional
 from uuid import UUID
 
+if sys.version_info < (3, 8):  # pragma: no cover
+    from typing_extensions import Protocol
+else:
+    from typing import Protocol
+
 _DATACLASSES_KW: Dict[str, Any] = {}
-if sys.version_info > (3, 10):  # pragma: no cover
+if sys.version_info >= (3, 10):  # pragma: no cover
     _DATACLASSES_KW["slots"] = True
 
 
@@ -25,6 +24,18 @@ class Message:
 
 
 CompletionHandle = Callable[[], Awaitable[None]]
+JobHandle = AsyncContextManager[Message]
+
+
+class JobHandleIterator(Protocol):
+    def __aiter__(self) -> JobHandleIterator:
+        ...
+
+    async def __anext__(self) -> JobHandle:
+        ...
+
+    async def receive(self) -> JobHandle:
+        ...
 
 
 class Queue(ABC):
@@ -34,7 +45,7 @@ class Queue(ABC):
         batch_size: int = 1,
         poll_interval: float = 1,
         fifo: bool = False,
-    ) -> AsyncIterator[AsyncContextManager[Message]]:
+    ) -> AsyncContextManager[JobHandleIterator]:
         """Poll for a batch of jobs.
 
         Will wait until at least one and up to `batch_size` jobs are available
@@ -60,11 +71,11 @@ class Queue(ABC):
             As long as you are in the context manager the visibility timeout weill be
             continually extended.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def send(
-        self, body: bytes, *, delay: Optional[timedelta] = None
+        self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
     ) -> AsyncContextManager[CompletionHandle]:
         """Put a job on the queue.
 
@@ -77,4 +88,4 @@ class Queue(ABC):
         Returns:
             AsyncContextManager[WaitForDoneHandle]: A context manager that
         """
-        pass
+        pass  # pragma: no cover
