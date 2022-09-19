@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import sys
 from collections import defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import (
     Any,
@@ -16,7 +14,6 @@ from typing import (
     Mapping,
     Optional,
     Set,
-    Tuple,
 )
 from uuid import UUID, uuid4
 
@@ -24,6 +21,8 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskStatus
 
+from pgjobq.api import CompletionHandle, Message
+from pgjobq.api import Queue as AbstractQueue
 from pgjobq.sql._functions import (
     ack_message,
     extend_ack_deadline,
@@ -32,26 +31,20 @@ from pgjobq.sql._functions import (
     publish_messages,
 )
 
-KW: Dict[str, Any] = {}
-if sys.version_info > (3, 10):  # pragma: no cover
-    KW["slots"] = True
 
-
-@dataclass(frozen=True, **KW)
-class Message:
-    id: UUID
-    body: bytes
-
-
-class Receive:
+class Queue(AbstractQueue):
     def __init__(
         self,
         *,
         pool: asyncpg.Pool,
         queue_name: str,
+        completion_callbacks: Dict[str, Dict[Hashable, Callable[[], Awaitable[None]]]],
+        new_job_callbacks: Dict[str, Set[Callable[[], Awaitable[None]]]],
     ) -> None:
         self._pool = pool
         self._queue_name = queue_name
+        self._completion_callbacks = completion_callbacks
+        self._new_job_callbacks = new_job_callbacks
 
     async def poll(
         self,
@@ -59,32 +52,6 @@ class Receive:
         poll_interval: float = 1,
         fifo: bool = False,
     ) -> AsyncIterator[AsyncContextManager[Message]]:
-        """Poll for a batch of jobs.
-
-        Will wait until at least one and up to `batch_size` jobs are available
-        by periodically checking the queue every `poll_interval` seconds.
-
-        When a new job is put on the queue a notification is sent that will cause
-        immediate polling, thus in practice the latency will be much lower than
-        poll interval.
-        This mechanism is however not 100% reliable so worst case latency is still
-        `poll_interval`.
-
-        Args:
-            batch_size (int, optional): maximum number of messages to gether.
-                Defaults to 1.
-            poll_interval (float, optional): interval between polls of the queue.
-                Defaults to 1.
-
-        Returns:
-            AsyncIterator[AsyncContextManager[Message]]: An iterator over a batch of messages.
-            Each message is wrapped by a context manager.
-            If you exit with an error the message will be nacked.
-            If you exit without an error it will be acked.
-            As long as you are in the context manager the visibility timeout weill be
-            continually extended.
-        """
-        listener_channel = f"new_message_{self._queue_name}"
         async with AsyncExitStack() as stack:
             jobs_conn: "asyncpg.Connection" = await stack.enter_async_context(
                 self._pool.acquire()  # type: ignore
@@ -100,27 +67,24 @@ class Receive:
                 new_job = anyio.Event()
                 # wait for a new job to be published or the poll interval to expire
 
-                async def skip_forward_if_new_msg(*_: Any) -> None:
+                async def set_wrapper() -> None:
+                    # asyncpg calls this as a coroutine
+                    # which anyio allows but raises a warning for
                     new_job.set()
 
-                await jobs_conn.add_listener(  # type: ignore
-                    listener_channel, skip_forward_if_new_msg
-                )
-
-                stack.push_async_callback(
-                    jobs_conn.remove_listener,  # type: ignore
-                    listener_channel,
-                    skip_forward_if_new_msg,
-                )
+                self._new_job_callbacks[self._queue_name].add(set_wrapper)
 
                 async def skip_forward_if_timeout() -> None:
                     await anyio.sleep(poll_interval)
                     new_job.set()
 
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(skip_forward_if_timeout)
-                    await new_job.wait()
-                    tg.cancel_scope.cancel()
+                try:
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(skip_forward_if_timeout)
+                        await new_job.wait()
+                        tg.cancel_scope.cancel()
+                finally:
+                    self._new_job_callbacks[self._queue_name].discard(new_job.set)
 
                 jobs = await poll_for_messages(
                     jobs_conn,
@@ -182,43 +146,16 @@ class Receive:
 
             yield cm()
 
-
-WaitForDoneHandle = Callable[[], Awaitable[None]]
-
-
-class Send:
-    def __init__(
-        self,
-        *,
-        pool: asyncpg.Pool,
-        queue_name: str,
-        completion_callbacks: Dict[str, Dict[Hashable, Callable[[], Awaitable[None]]]],
-    ) -> None:
-        self._pool = pool
-        self._queue_name = queue_name
-        self._completion_callbacks = completion_callbacks
-
     def send(
         self, body: bytes, *, delay: Optional[timedelta] = None
-    ) -> AsyncContextManager[WaitForDoneHandle]:
-        """Put a job on the queue.
-
-        You _must_ enter the context manager but awaiting the completion
-        handle is optional.
-
-        Args:
-            body (bytes): arbitrary bytes, the body of the job.
-
-        Returns:
-            AsyncContextManager[WaitForDoneHandle]: A context manager that
-        """
+    ) -> AsyncContextManager[CompletionHandle]:
         done = anyio.Event()
         # create the job id application side
         # so that we can start listening before we send
         job_id = uuid4()
 
         @asynccontextmanager
-        async def cm() -> AsyncIterator[WaitForDoneHandle]:
+        async def cm() -> AsyncIterator[CompletionHandle]:
             conn: asyncpg.Connection
             async with self._pool.acquire() as conn:  # type: ignore
 
@@ -248,13 +185,23 @@ class Send:
 async def connect_to_queue(
     queue_name: str,
     pool: asyncpg.Pool,
-) -> AsyncIterator[Tuple[Send, Receive]]:
+) -> AsyncIterator[AbstractQueue]:
+    """Connect to an existing queue.
+
+    This is the main way to interact with an existing Queue; they cannot
+    be constructed directly.
+
+    Args:
+        queue_name (str): The name of the queue passed to `create_queue`.
+        pool (asyncpg.Pool): a database connection pool.
+
+    Returns:
+        AsyncContextManager[AbstractQueue]: A context manager yielding an AbstractQueue
+    """
     completion_callbacks: Dict[
         str, Dict[Hashable, Callable[[], Awaitable[None]]]
     ] = defaultdict(dict)
-    new_message_callbacks: Dict[str, Set[Callable[[], Awaitable[None]]]] = defaultdict(
-        set
-    )
+    new_job_callbacks: Dict[str, Set[Callable[[], Awaitable[None]]]] = defaultdict(set)
 
     background_conn: asyncpg.Connection
     background_conn_lock = anyio.Lock()
@@ -275,7 +222,7 @@ async def connect_to_queue(
                 channel: str,
                 payload: str,
             ) -> None:
-                queue_name, message_id = payload.split(",", maxsplit=1)
+                queue_name, message_id, *_ = payload.split(",")
                 cb = completion_callbacks[queue_name].get(UUID(message_id), None)
                 if cb is not None:
                     await cb()
@@ -286,8 +233,8 @@ async def connect_to_queue(
                 channel: str,
                 payload: str,
             ) -> None:
-                queue_name = payload
-                for cb in new_message_callbacks[queue_name]:
+                queue_name, *_ = payload.split(",")
+                for cb in new_job_callbacks[queue_name]:
                     await cb()
 
             await background_conn.add_listener(  # type: ignore
@@ -302,15 +249,15 @@ async def connect_to_queue(
 
             tg.start_soon(cleanup_cb)
 
-            send = Send(
+            queue = Queue(
                 pool=pool,
                 queue_name=queue_name,
                 completion_callbacks=completion_callbacks,
+                new_job_callbacks=new_job_callbacks,
             )
-            rcv = Receive(pool=pool, queue_name=queue_name)
 
             try:
-                yield send, rcv
+                yield queue
             finally:
                 async with background_conn_lock:
                     await background_conn.remove_listener(  # type: ignore

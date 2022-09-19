@@ -1,12 +1,9 @@
 from datetime import timedelta
-from typing import Tuple
 
 import asyncpg  # type: ignore
 import pytest
 
-from pgjobq import Receive, Send, create_queue, delete_queue
-
-SendRcv = Tuple[Send, Receive]
+from pgjobq import create_queue, delete_queue
 
 
 @pytest.mark.anyio
