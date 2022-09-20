@@ -60,7 +60,9 @@ jobs:
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
       - name: Test
-        run: make test
+        run: |
+          apt-get update && apt-get install -y make
+          make test
       - name: Export Coverage Report
         run: |
           poetry run pip install "coverage[toml]"
