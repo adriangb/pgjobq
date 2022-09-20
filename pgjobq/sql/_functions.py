@@ -29,7 +29,6 @@ WITH queue_info AS (
 )
 INSERT INTO pgjobq.messages(
     queue_id,
-    batch_id,
     id,
     expires_at,
     delivery_attempts_remaining,
@@ -38,14 +37,13 @@ INSERT INTO pgjobq.messages(
 )
 SELECT
     queue_id,
-    $2,
-    unnest($3::uuid[]),
+    unnest($2::uuid[]),
     now() + retention_period,
     max_delivery_attempts,
     -- set next ack to now
     -- somewhat meaningless but avoids nulls
-    now() + COALESCE($5, '0 seconds'::interval),
-    unnest($4::bytea[])
+    now() + COALESCE($4, '0 seconds'::interval),
+    unnest($3::bytea[])
 FROM queue_info
 LEFT JOIN published_notification ON 1 = 1
 RETURNING 1;  -- NULL if the queue doesn't exist
@@ -56,7 +54,6 @@ async def publish_messages(
     conn: PoolOrConnection,
     *,
     queue_name: str,
-    batch_id: UUID,
     message_ids: List[UUID],
     message_bodies: List[bytes],
     delay: Optional[timedelta],
@@ -64,7 +61,6 @@ async def publish_messages(
     res: Optional[int] = await conn.fetchval(  # type: ignore
         PUBLISH_MESSAGES,
         queue_name,
-        batch_id,
         message_ids,
         message_bodies,
         delay,
@@ -109,7 +105,7 @@ POLL_FOR_MESSAGES = _POLL_FOR_MESSAGES.format(order_by="")
 POLL_FOR_MESSAGES_FIFO = _POLL_FOR_MESSAGES.format(order_by="ORDER BY id")
 
 
-class Message(TypedDict):
+class JobRecord(TypedDict):
     id: UUID
     body: bytes
     next_ack_deadline: datetime
@@ -121,7 +117,7 @@ async def poll_for_messages(
     queue_name: str,
     batch_size: int,
     fifo: bool,
-) -> List[Message]:
+) -> Sequence[JobRecord]:
     query = POLL_FOR_MESSAGES_FIFO if fifo else POLL_FOR_MESSAGES
     return await conn.fetch(  # type: ignore
         query,
@@ -133,8 +129,7 @@ async def poll_for_messages(
 ACK_MESSAGE = """\
 WITH msg AS (
     SELECT
-        id,
-        batch_id
+        id
     FROM pgjobq.messages
     WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid
 ), msg_notification AS (
