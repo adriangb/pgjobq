@@ -150,15 +150,11 @@ async def ack_message(
 
 
 NACK_MESSAGE = """\
-WITH msg AS (
-    SELECT pg_notify('pgjobq.new_job', $1)
-)
 UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
-RETURNING (SELECT 1 FROM msg) AS notified;
+WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
 """
 
 
@@ -168,6 +164,7 @@ async def nack_message(
     job_id: UUID,
 ) -> None:
     await conn.execute(NACK_MESSAGE, queue_name, job_id)  # type: ignore
+    await conn.execute("SELECT pg_notify('pgjobq.new_job', $1)", queue_name)  # type: ignore
 
 
 EXTEND_ACK_DEADLINES = """\
