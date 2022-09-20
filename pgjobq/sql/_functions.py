@@ -137,7 +137,11 @@ WITH msg AS (
 )
 DELETE
 FROM pgjobq.messages
-WHERE pgjobq.messages.id = (SELECT id FROM msg) AND 1 = (SELECT 1 FROM msg_notification);
+WHERE (
+    pgjobq.messages.id = (SELECT id FROM msg)
+    AND
+    1 = (SELECT 1 FROM msg_notification)
+);
 """
 
 
@@ -154,7 +158,9 @@ WITH msg AS (
     SELECT pg_notify('pgjobq.new_job', $1)
 )
 UPDATE pgjobq.messages
-SET available_at = now()
+-- make it available in the past to avoid race conditions with extending acks
+-- which check to make sure the message is still available before extending
+SET available_at = now() - '10 seconds'::interval
 WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2 AND 1 = (SELECT 1 FROM msg);
 """
 
@@ -189,6 +195,7 @@ WITH queue_info AS (
         -- extending acks and nacking
         available_at > now()
     )
+    ORDER BY id
     FOR UPDATE SKIP LOCKED
 ), updated_messages AS (
     UPDATE pgjobq.messages
