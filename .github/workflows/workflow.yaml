@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.7", "3.8", "3.9", "3.10"]
+        python: ["3.7"]
     defaults:
       run:
         shell: bash
@@ -57,6 +57,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
       - name: Test
         env:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
