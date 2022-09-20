@@ -12,7 +12,7 @@ from pgjobq import Queue, connect_to_queue, create_queue
 
 @pytest.fixture
 async def queue(migrated_pool: asyncpg.Pool) -> AsyncGenerator[Queue, None]:
-    await create_queue("test-queue", migrated_pool)
+    await create_queue("test-queue", migrated_pool, ack_deadline=timedelta(seconds=12))
     async with connect_to_queue("test-queue", migrated_pool) as queue:
         yield queue
 
