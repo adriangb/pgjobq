@@ -49,11 +49,11 @@ jobs:
         ports:
           # will assign a random free host port
           - 5432/tcp
-    env:
-      POSTGRES_PORT: ${{ test.services.postgres.ports[5432] }} # get randomly assigned published port
     steps:
       - uses: actions/checkout@v2
       - name: Test
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
         run: |
           PGPASSWORD=postgres psql --host localhost --port $POSTGRES_PORT --user postgres -c "SELECT 1"
           # apt-get update && apt-get install -y make
