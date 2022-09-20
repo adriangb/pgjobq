@@ -51,13 +51,18 @@ jobs:
           - 5432/tcp
     steps:
       - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install and configure Poetry
+        uses: snok/install-poetry@v1.3.1
       - name: Test
         env:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
         run: |
-          PGPASSWORD=postgres psql --host localhost --port $POSTGRES_PORT --user postgres -c "SELECT 1"
-          # apt-get update && apt-get install -y make
-          # make test
+          apt-get update && apt-get install -y make
+          make test
   version-check:
     name: Check Version Bump
     if: github.ref != 'refs/heads/main'
