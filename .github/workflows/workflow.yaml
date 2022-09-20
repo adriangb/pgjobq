@@ -28,19 +28,12 @@ jobs:
         run: make lint
   test:
     name: Run Tests
-    runs-on: ${{ matrix.container }}
+    runs-on: ubuntu-latest
+    container: ubuntu:latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python: "3.7"
-            container: ubuntu:latest
-          - python: "3.8"
-            container: ubuntu:latest
-          - python: "3.9"
-            container: ubuntu:latest
-          - python: "3.10"
-            container: ubuntu:latest
+        python: ["3.7", "3.8", "3.9", "3.10"]
     defaults:
       run:
         shell: bash
@@ -58,7 +51,6 @@ jobs:
           - 5432:5432
     env:
       POSTGRES_HOST: postgres
-    container: ${{ matrix.container }}
     steps:
       - run: |
           sudo apt-get update && sudo apt-get install -y postgresql-client
