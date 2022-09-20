@@ -58,7 +58,7 @@ async def test_worker_raises_exception_in_job_handle(
                     raise MyException
 
     async with queue.receive() as job_handle_iter:
-        with anyio.fail_after(0.25):  # redelivery should be immediate
+        with anyio.fail_after(0.75):  # redelivery should be immediate
             job_handle = await job_handle_iter.receive()
         async with job_handle as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -80,7 +80,7 @@ async def test_worker_raises_exception_before_job_handle_is_entered(
                 raise MyException
 
     async with queue.receive() as job_handle_iter:
-        with anyio.fail_after(0.25):  # redelivery should be immediate
+        with anyio.fail_after(0.75):  # redelivery should be immediate
             job_handle = await job_handle_iter.receive()
         async with job_handle as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -102,7 +102,7 @@ async def test_worker_raises_exception_in_poll_with_pending_jobs(
             raise MyException
 
     async with queue.receive() as job_handle_iter:
-        with anyio.fail_after(0.25):  # redelivery should be immediate
+        with anyio.fail_after(0.75):  # redelivery should be immediate
             job_handle = await job_handle_iter.receive()
         async with job_handle as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -359,7 +359,7 @@ async def test_batched_rcv_can_be_interrupted(
     # we can immediately process the other job because it was nacked
     # when we exited the Queue.receive() context
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.25):  # redelivery should be immediate
+        with anyio.fail_after(0.75):  # redelivery should be immediate
             job_handle = await job_handle_stream.receive()
         async with job_handle as job:
             assert job.body == b"{}", job.body
