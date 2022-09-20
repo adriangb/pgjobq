@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.7"]
+        python: ["3.7", "3.8", "3.9", "3.10"]
     defaults:
       run:
         shell: bash
@@ -47,7 +47,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          - 5432:5432
+          # will assign a random free host port
+          - 5432/tcp
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python }}
@@ -56,16 +57,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
-      - name: Start SSH session
-        uses: luchihoratiu/debug-via-ssh@main
-        with:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-          SSH_PASS: ${{ secrets.SSH_PASS }}
       - name: Test
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
         run: |
-          PGPASSWORD=postgres psql --host localhost --user postgres --dbname postgres -c "SELECT 1"
-          # apt-get update && apt-get install -y make
-          # make test
+          apt-get update && apt-get install -y make
+          make test
   version-check:
     name: Check Version Bump
     if: github.ref != 'refs/heads/main'

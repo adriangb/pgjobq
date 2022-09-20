@@ -45,8 +45,7 @@ SELECT
     now() + COALESCE($4, '0 seconds'::interval),
     unnest($3::bytea[])
 FROM queue_info
-LEFT JOIN published_notification ON 1 = 1
-RETURNING 1;  -- NULL if the queue doesn't exist
+RETURNING (SELECT 1 FROM published_notification) AS notified;  -- NULL if the queue doesn't exist
 """
 
 
@@ -137,11 +136,8 @@ WITH msg AS (
 )
 DELETE
 FROM pgjobq.messages
-WHERE (
-    pgjobq.messages.id = (SELECT id FROM msg)
-    AND
-    1 = (SELECT 1 FROM msg_notification)
-);
+WHERE pgjobq.messages.id = (SELECT id FROM msg)
+RETURNING (SELECT 1 FROM msg_notification) AS notified;
 """
 
 
@@ -161,7 +157,8 @@ UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2 AND 1 = (SELECT 1 FROM msg);
+WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
+RETURNING (SELECT 1 FROM msg) AS notified;
 """
 
 
