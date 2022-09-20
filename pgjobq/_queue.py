@@ -111,7 +111,7 @@ class Queue(AbstractQueue):
     queue_name: str
     completion_callbacks: Dict[str, Dict[Hashable, anyio.Event]]
     new_job_callbacks: Dict[str, Set[anyio.Event]]
-    in_flight_jobs: Set[JobManager]
+    in_flight_jobs: Dict[UUID, Set[JobManager]]
 
     @asynccontextmanager
     async def receive(
@@ -121,6 +121,10 @@ class Queue(AbstractQueue):
         fifo: bool = False,
     ) -> AsyncIterator[JobStream]:
         send, rcv = anyio.create_memory_object_stream(0, JobHandle)  # type: ignore
+
+        in_flight_jobs: Set[JobManager] = set()
+        poll_id = uuid4()
+        self.in_flight_jobs[poll_id] = in_flight_jobs
 
         async def gather_jobs() -> None:
             jobs = await poll_for_messages(
@@ -167,10 +171,10 @@ class Queue(AbstractQueue):
                         pool=self.pool,
                         message=message,
                         queue_name=self.queue_name,
-                        pending_jobs=self.in_flight_jobs,
+                        pending_jobs=in_flight_jobs,
                     )
                     managers.append(manager)
-                    self.in_flight_jobs.add(manager)
+                    in_flight_jobs.add(manager)
 
                 for manager in managers:
                     await send.send(manager.wrap_worker())
@@ -186,8 +190,9 @@ class Queue(AbstractQueue):
                     # stop polling
                     poll_tg.cancel_scope.cancel()
         finally:
+            self.in_flight_jobs.pop(poll_id)
             async with anyio.create_task_group() as termination_tg:
-                for manager in self.in_flight_jobs.copy():
+                for manager in in_flight_jobs.copy():
                     termination_tg.start_soon(manager.shutdown)
 
     def send(
@@ -241,7 +246,7 @@ async def connect_to_queue(
     """
     completion_callbacks: Dict[str, Dict[Hashable, anyio.Event]] = defaultdict(dict)
     new_job_callbacks: Dict[str, Set[anyio.Event]] = defaultdict(set)
-    in_flight_jobs: Set[JobManager] = set()
+    in_flight_jobs: Dict[UUID, Set[JobManager]] = {}
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
@@ -252,7 +257,9 @@ async def connect_to_queue(
 
     async def extend_acks(conn: asyncpg.Connection) -> None:
         while True:
-            job_ids = [j.message.id for j in in_flight_jobs]
+            job_ids = [
+                job.message.id for jobs in in_flight_jobs.values() for job in jobs
+            ]
             await extend_ack_deadlines(
                 conn,
                 queue_name,

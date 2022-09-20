@@ -160,7 +160,7 @@ WITH msg AS (
 UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
-SET available_at = now() - '10 seconds'::interval
+SET available_at = now() - '1 second'::interval
 WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2 AND 1 = (SELECT 1 FROM msg);
 """
 
