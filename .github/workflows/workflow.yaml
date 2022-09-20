@@ -29,7 +29,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    container: ubuntu:latest
+    container: python:${{ matrix.python }}
     strategy:
       fail-fast: false
       matrix:
