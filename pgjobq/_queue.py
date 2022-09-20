@@ -259,11 +259,13 @@ async def connect_to_queue(
             job_ids = [
                 job.message.id for jobs in in_flight_jobs.values() for job in jobs
             ]
-            await extend_ack_deadlines(
-                conn,
-                queue_name,
-                job_ids,
-            )
+            if job_ids:
+                print(job_ids)
+                await extend_ack_deadlines(
+                    conn,
+                    queue_name,
+                    job_ids,
+                )
             await anyio.sleep(0.5)  # less than the min ack deadline
 
     async def process_completion_notification(

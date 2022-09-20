@@ -58,6 +58,12 @@ async def test_worker_raises_exception_in_job_handle(
                 async with job_handle as _:
                     raise MyException
 
+    print(
+        await queue.pool.fetch(
+            "SELECT * FROM pgjobq.messages WHERE available_at <= now()"
+        )
+    )
+
     async with queue.receive() as job_handle_iter:
         # with anyio.fail_after(0.75):  # redelivery should be immediate
         start = time()
