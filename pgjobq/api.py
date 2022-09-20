@@ -4,13 +4,15 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, AsyncContextManager, Awaitable, Callable, Dict, Optional
+from typing import Any, AsyncContextManager, Dict, Mapping, Optional
 from uuid import UUID
 
 if sys.version_info < (3, 8):  # pragma: no cover
     from typing_extensions import Protocol
 else:
     from typing import Protocol
+
+import anyio
 
 _DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
@@ -23,12 +25,11 @@ class Message:
     body: bytes
 
 
-CompletionHandle = Callable[[], Awaitable[None]]
 JobHandle = AsyncContextManager[Message]
 
 
-class JobHandleIterator(Protocol):
-    def __aiter__(self) -> JobHandleIterator:
+class JobStream(Protocol):
+    def __aiter__(self) -> JobStream:
         ...
 
     async def __anext__(self) -> JobHandle:
@@ -38,14 +39,25 @@ class JobHandleIterator(Protocol):
         ...
 
 
+class SendCompletionHandle(Protocol):
+    @property
+    def jobs(self) -> Mapping[UUID, anyio.Event]:
+        """Completion events for each published job"""
+        ...
+
+    async def __call__(self) -> None:
+        """Wait for all jobs to complete"""
+        ...
+
+
 class Queue(ABC):
     @abstractmethod
-    def poll(
+    def receive(
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
         fifo: bool = False,
-    ) -> AsyncContextManager[JobHandleIterator]:
+    ) -> AsyncContextManager[JobStream]:
         """Poll for a batch of jobs.
 
         Will wait until at least one and up to `batch_size` jobs are available
@@ -76,8 +88,8 @@ class Queue(ABC):
     @abstractmethod
     def send(
         self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
-    ) -> AsyncContextManager[CompletionHandle]:
-        """Put a job on the queue.
+    ) -> AsyncContextManager[SendCompletionHandle]:
+        """Put jobs on the queue.
 
         You _must_ enter the context manager but awaiting the completion
         handle is optional.
@@ -86,6 +98,6 @@ class Queue(ABC):
             body (bytes): arbitrary bytes, the body of the job.
 
         Returns:
-            AsyncContextManager[WaitForDoneHandle]: A context manager that
+            AsyncContextManager[JobCompletionHandle]
         """
         pass  # pragma: no cover
