@@ -29,7 +29,6 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    container: python:${{ matrix.python }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,15 +47,17 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          - 5432:5432
+          # will assign a random free host port
+          - 5432/tcp
     env:
-      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
     steps:
       - uses: actions/checkout@v2
       - name: Test
         run: |
-          apt-get update && apt-get install -y make
-          make test
+          PGPASSWORD=postgres psql --host localhost --port $POSTGRES_PORT --user postgres -c "SELECT 1"
+          # apt-get update && apt-get install -y make
+          # make test
   version-check:
     name: Check Version Bump
     if: github.ref != 'refs/heads/main'
