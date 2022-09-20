@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import (
     Any,
     AsyncContextManager,
     AsyncIterator,
-    Callable,
     Dict,
     Hashable,
     List,
@@ -26,7 +25,7 @@ from pgjobq.api import CompletionHandle, JobHandle, JobHandleIterator, Message
 from pgjobq.api import Queue as AbstractQueue
 from pgjobq.sql._functions import (
     ack_message,
-    extend_ack_deadline,
+    extend_ack_deadlines,
     nack_message,
     poll_for_messages,
     publish_messages,
@@ -40,11 +39,11 @@ if sys.version_info >= (3, 10):  # pragma: no cover
 @dataclass(**DATACLASSES_KW)
 class JobManager:
     pool: asyncpg.Pool
-    connection: asyncpg.Connection
     message: Message
     queue_name: str
     terminate: anyio.Event
     terminated: anyio.Event
+    pending_jobs: Set[JobManager]
     success: bool = False
 
     @asynccontextmanager
@@ -57,65 +56,35 @@ class JobManager:
             )
         try:
             yield self.message
+            self.pending_jobs.discard(self)
             self.success = True
             self.terminate.set()
         except Exception:
+            self.pending_jobs.discard(self)
             # handle exceptions after entering the message's context manager
             self.terminate.set()
             raise
         finally:
             await self.terminated.wait()
 
-    async def manage(
-        self, next_ack_deadline: datetime, completion_cb: Callable[[JobManager], None]
-    ) -> None:
-        try:
-
-            async def work(deadline: datetime) -> None:
-                while True:
-                    # min ack deadline is 1 sec so 0.5 should be a reasonable lower bound
-                    delay = max(
-                        (
-                            datetime.now() - deadline - timedelta(seconds=1)
-                        ).total_seconds(),
-                        0.5,
-                    )
-                    await anyio.sleep(delay)
-                    try:
-                        deadline = await extend_ack_deadline(
-                            self.connection,
-                            self.queue_name,
-                            self.message.id,
-                        )
-                    except LookupError:
-                        # message was acked while we were updating it
-                        return
-
-            async def cancel_if_terminated(tg: TaskGroup) -> None:
-                await self.terminate.wait()
-                tg.cancel_scope.cancel()
-
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(cancel_if_terminated, tg)
-                tg.start_soon(work, next_ack_deadline)
-        finally:
+    async def shutdown(self) -> None:
+        await self.terminate.wait()
+        conn: asyncpg.Connection
+        async with self.pool.acquire() as conn:  # type: ignore
             try:
                 if self.success:
                     await ack_message(
-                        self.connection,
+                        conn,
                         self.queue_name,
                         self.message.id,
                     )
                 else:
                     await nack_message(
-                        self.connection,
+                        conn,
                         self.queue_name,
                         self.message.id,
                     )
             finally:
-                with anyio.CancelScope(shield=True):
-                    await self.pool.release(self.connection)  # type: ignore
-                completion_cb(self)
                 self.terminated.set()
 
     # need to implement this since we override __hash__
@@ -127,19 +96,13 @@ class JobManager:
         return id(self)
 
 
+@dataclass(**DATACLASSES_KW)
 class Queue(AbstractQueue):
-    def __init__(
-        self,
-        *,
-        pool: asyncpg.Pool,
-        queue_name: str,
-        completion_callbacks: Dict[str, Dict[Hashable, anyio.Event]],
-        new_job_callbacks: Dict[str, Set[anyio.Event]],
-    ) -> None:
-        self._pool = pool
-        self._queue_name = queue_name
-        self._completion_callbacks = completion_callbacks
-        self._new_job_callbacks = new_job_callbacks
+    pool: asyncpg.Pool
+    queue_name: str
+    completion_callbacks: Dict[str, Dict[Hashable, anyio.Event]]
+    new_job_callbacks: Dict[str, Set[anyio.Event]]
+    in_flight_jobs: Set[JobManager]
 
     @asynccontextmanager
     async def poll(
@@ -150,27 +113,10 @@ class Queue(AbstractQueue):
     ) -> AsyncIterator[JobHandleIterator]:
         send, rcv = anyio.create_memory_object_stream(0, JobHandle)  # type: ignore
 
-        pending_jobs: Set[JobManager] = set()
-
-        unreleased_connections: Set[asyncpg.Connection] = set()
-
-        async def gather_connections() -> None:
-            # get a connection for each message we'll have in the batch
-            # we need to do this upfront to make sure we can avoid race conditions in
-            # acquiring connections to extend ack deadlines
-            for _ in range(batch_size):
-                unreleased_connections.add(await self._pool.acquire())  # type: ignore
-
-        await gather_connections()
-
-        def mark_manager_as_completed(manager: JobManager) -> None:
-            pending_jobs.discard(manager)
-            unreleased_connections.discard(manager.connection)
-
-        async def gather_jobs() -> None:
+        async def gather_jobs(tg: TaskGroup) -> None:
             jobs = await poll_for_messages(
-                self._pool,
-                queue_name=self._queue_name,
+                self.pool,
+                queue_name=self.queue_name,
                 fifo=fifo,
                 batch_size=batch_size,
             )
@@ -179,7 +125,7 @@ class Queue(AbstractQueue):
                     continue_to_next_iter = anyio.Event()
                     # wait for a new job to be published or the poll interval to expire
 
-                    self._new_job_callbacks[self._queue_name].add(continue_to_next_iter)
+                    self.new_job_callbacks[self.queue_name].add(continue_to_next_iter)
 
                     async def skip_forward_if_timeout() -> None:
                         await anyio.sleep(poll_interval)
@@ -191,80 +137,60 @@ class Queue(AbstractQueue):
                             await continue_to_next_iter.wait()
                             gather_tg.cancel_scope.cancel()
                     finally:
-                        self._new_job_callbacks[self._queue_name].discard(
+                        self.new_job_callbacks[self.queue_name].discard(
                             continue_to_next_iter
                         )
 
                     jobs = await poll_for_messages(
-                        self._pool,
-                        queue_name=self._queue_name,
+                        self.pool,
+                        queue_name=self.queue_name,
                         fifo=fifo,
                         batch_size=batch_size,
                     )
 
                 managers: List[JobManager] = []
 
-                # if we didn't get batch_size jobs we'll have unused connections
-                # release them now to make them available
-                # since we may have been cancelled at some point between acquiring them
-                # and now  this may not run, hence we also release them when exiting Queue.poll()
-                for _ in range(batch_size - len(jobs)):
-                    poll_tg.start_soon(self._pool.release, unreleased_connections.pop())  # type: ignore
-
                 # start extending ack deadlines before handing control over to workers
                 # so that processing each job takes > ack deadline messages aren't lost
                 for job in jobs:
                     message = Message(id=job["id"], body=job["body"])
                     manager = JobManager(
-                        self._pool,
-                        unreleased_connections.pop(),
-                        message,
-                        self._queue_name,
-                        anyio.Event(),
-                        anyio.Event(),
+                        pool=self.pool,
+                        message=message,
+                        queue_name=self.queue_name,
+                        terminate=anyio.Event(),
+                        terminated=anyio.Event(),
+                        pending_jobs=self.in_flight_jobs,
                     )
                     managers.append(manager)
-                    pending_jobs.add(manager)
+                    self.in_flight_jobs.add(manager)
                     # this keeps Queue.poll() open until all in-flight jobs
                     # have completed since manage_ack_deadline will return as soon
                     # as one of two things happens:
                     # - JobManager.wrap_worker() sets JobManager.terminated (it may never even run)
                     # - Queue.poll() exits and sets JobManager.terminated for all in-flight jobs
                     #   that haven't started running
-                    job_tg.start_soon(
-                        manager.manage,
-                        job["next_ack_deadline"],
-                        mark_manager_as_completed,
-                    )
+                    tg.start_soon(manager.shutdown)
 
                 for manager in managers:
                     await send.send(manager.wrap_worker())
 
                 jobs = []
-                await gather_connections()
 
         async with anyio.create_task_group() as job_tg:
             try:
                 async with anyio.create_task_group() as poll_tg:
-                    poll_tg.start_soon(gather_jobs)
+                    poll_tg.start_soon(gather_jobs, job_tg)
                     try:
                         yield rcv
                     finally:
                         # stop polling
                         poll_tg.cancel_scope.cancel()
             finally:
-                # terminate any in flight jobs that haven't started work
-                # - jobs that haven't been started become unavailable
-                #   and raise an exception if work is started on them
-                # - jobs that were started but not finished continue
-                #   to run unmolested and we wait for them to complete
-                #   before exiting
-                with anyio.CancelScope(shield=True):
-                    for connection in unreleased_connections:
-                        await self._pool.release(connection)  # type: ignore
-                    for manager in pending_jobs.copy():
+                async with anyio.create_task_group() as termination_tg:
+                    for manager in self.in_flight_jobs.copy():
                         manager.terminate.set()
-                        await manager.terminated.wait()
+                        termination_tg.start_soon(manager.terminated.wait)
 
     def send(
         self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
@@ -279,13 +205,13 @@ class Queue(AbstractQueue):
         @asynccontextmanager
         async def cm() -> AsyncIterator[CompletionHandle]:
             conn: asyncpg.Connection
-            async with self._pool.acquire() as conn:  # type: ignore
+            async with self.pool.acquire() as conn:  # type: ignore
                 for job_id, done_event in done_events.items():
-                    self._completion_callbacks[self._queue_name][job_id] = done_event
+                    self.completion_callbacks[self.queue_name][job_id] = done_event
                 try:
                     await publish_messages(
                         conn,
-                        queue_name=self._queue_name,
+                        queue_name=self.queue_name,
                         batch_id=batch_id,
                         message_ids=job_ids,
                         message_bodies=all_bodies,
@@ -301,7 +227,7 @@ class Queue(AbstractQueue):
                     yield done_handle
                 finally:
                     for job_id, done_event in done_events.items():
-                        self._completion_callbacks[self._queue_name].pop(job_id)
+                        self.completion_callbacks[self.queue_name].pop(job_id)
 
         return cm()
 
@@ -325,70 +251,82 @@ async def connect_to_queue(
     """
     completion_callbacks: Dict[str, Dict[Hashable, anyio.Event]] = defaultdict(dict)
     new_job_callbacks: Dict[str, Set[anyio.Event]] = defaultdict(set)
+    in_flight_jobs: Set[JobManager] = set()
 
-    background_conn: asyncpg.Connection
-    background_conn_lock = anyio.Lock()
-    async with pool.acquire() as background_conn:  # type: ignore
+    cleanup_conn_lock = anyio.Lock()
+
+    async def run_cleanup(conn: asyncpg.Connection) -> None:
+        while True:
+            async with cleanup_conn_lock:
+                await conn.execute(  # type: ignore
+                    "SELECT pgjobq.cleanup_dead_messages()",
+                )
+            await anyio.sleep(1)
+
+    async def extend_acks(conn: asyncpg.Connection) -> None:
+        while True:
+            job_ids = [j.message.id for j in in_flight_jobs]
+            await extend_ack_deadlines(
+                conn,
+                queue_name,
+                job_ids,
+            )
+            await anyio.sleep(0.5)  # less than the min ack deadline
+
+    async def process_completion_notification(
+        conn: asyncpg.Connection,
+        pid: int,
+        channel: str,
+        payload: str,
+    ) -> None:
+        queue_name, job_id = payload.split(",")
+        cb = completion_callbacks[queue_name].get(UUID(job_id), None)
+        if cb is not None:
+            cb.set()
+
+    async def process_new_job_notification(
+        conn: asyncpg.Connection,
+        pid: int,
+        channel: str,
+        payload: str,
+    ) -> None:
+        queue_name, *_ = payload.split(",")
+        for event in new_job_callbacks[queue_name]:
+            event.set()
+
+    async with AsyncExitStack() as stack:
+        cleanup_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
+        ack_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
+        await cleanup_conn.add_listener(  # type: ignore
+            channel="pgjobq.job_completed",
+            callback=process_completion_notification,
+        )
+        stack.push_async_callback(
+            cleanup_conn.remove_listener,  # type: ignore
+            channel="pgjobq.job_completed",
+            callback=process_completion_notification,
+        )
+        await cleanup_conn.add_listener(  # type: ignore
+            channel="pgjobq.new_job",
+            callback=process_new_job_notification,
+        )
+        stack.push_async_callback(
+            cleanup_conn.remove_listener,  # type: ignore
+            channel="pgjobq.new_job",
+            callback=process_new_job_notification,
+        )
         async with anyio.create_task_group() as tg:
-
-            async def cleanup_cb() -> None:
-                while True:
-                    async with background_conn_lock:
-                        await background_conn.execute(  # type: ignore
-                            "SELECT pgjobq.cleanup_dead_messages()",
-                        )
-                    await anyio.sleep(1)
-
-            async def process_completion_notification(
-                conn: asyncpg.Connection,
-                pid: int,
-                channel: str,
-                payload: str,
-            ) -> None:
-                queue_name, job_id = payload.split(",")
-                cb = completion_callbacks[queue_name].get(UUID(job_id), None)
-                if cb is not None:
-                    cb.set()
-
-            async def process_new_job_notification(
-                conn: asyncpg.Connection,
-                pid: int,
-                channel: str,
-                payload: str,
-            ) -> None:
-                queue_name, *_ = payload.split(",")
-                for event in new_job_callbacks[queue_name]:
-                    event.set()
-
-            await background_conn.add_listener(  # type: ignore
-                channel="pgjobq.job_completed",
-                callback=process_completion_notification,
-            )
-
-            await background_conn.add_listener(  # type: ignore
-                channel="pgjobq.new_job",
-                callback=process_new_job_notification,
-            )
-
-            tg.start_soon(cleanup_cb)
+            tg.start_soon(run_cleanup, cleanup_conn)
+            tg.start_soon(extend_acks, ack_conn)
 
             queue = Queue(
                 pool=pool,
                 queue_name=queue_name,
                 completion_callbacks=completion_callbacks,
                 new_job_callbacks=new_job_callbacks,
+                in_flight_jobs=in_flight_jobs,
             )
-
             try:
                 yield queue
             finally:
-                async with background_conn_lock:
-                    await background_conn.remove_listener(  # type: ignore
-                        channel="pgjobq.new_job",
-                        callback=process_new_job_notification,
-                    )
-                    await background_conn.remove_listener(  # type: ignore
-                        channel="pgjobq.job_completed",
-                        callback=process_completion_notification,
-                    )
                 tg.cancel_scope.cancel()

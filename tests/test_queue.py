@@ -29,6 +29,19 @@ async def test_completion_handle_ignored(
 
 
 @pytest.mark.anyio
+async def test_worker_takes_longer_than_ack_interval(
+    queue: Queue,
+) -> None:
+    async with queue.send(b'{"foo":"bar"}'):
+        pass
+
+    async with queue.poll() as job_handle_iter:
+        async with await job_handle_iter.receive() as job:
+            assert job.body == b'{"foo":"bar"}', job.body
+            await anyio.sleep(1)  # default ack interval
+
+
+@pytest.mark.anyio
 async def test_worker_raises_exception_in_job_handle(
     queue: Queue,
 ) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, List, Mapping, Optional, TypedDict, Union
+from typing import Any, List, Mapping, Optional, Sequence, TypedDict, Union
 from uuid import UUID
 
 import asyncpg  # type: ignore
@@ -166,38 +166,47 @@ async def nack_message(
     await conn.execute(NACK_MESSAGE, queue_name, job_id)  # type: ignore
 
 
-EXTEND_ACK_DEADLINE = """\
-WITH message_for_update AS (
+EXTEND_ACK_DEADLINES = """\
+WITH queue_info AS (
+    SELECT
+        id
+    FROM pgjobq.queues
+    WHERE name = $1
+), messages_for_update AS (
     SELECT
         queue_id,
         id,
         available_at
     FROM pgjobq.messages
-    WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
+    WHERE queue_id = (SELECT id FROM queue_info) AND id = any($2::uuid[])
     FOR UPDATE SKIP LOCKED
-)
-UPDATE pgjobq.messages
-SET available_at = (
-    now() + (
-        SELECT ack_deadline
-        FROM pgjobq.queues
-        WHERE pgjobq.queues.id = (
-            SELECT queue_id FROM message_for_update
+), updated_messages AS (
+    UPDATE pgjobq.messages
+    SET available_at = (
+        now() + (
+            SELECT ack_deadline
+            FROM pgjobq.queues
+            WHERE pgjobq.queues.id = (
+                SELECT id FROM queue_info
+            )
         )
     )
+    WHERE (
+        pgjobq.messages.queue_id = (SELECT id FROM queue_info)
+        AND
+        pgjobq.messages.id IN (SELECT id FROM messages_for_update)
+    )
+    RETURNING available_at AS next_ack_deadline
 )
-WHERE pgjobq.messages.id = (SELECT id FROM message_for_update)
-RETURNING available_at AS next_ack_deadline;
+SELECT next_ack_deadline
+FROM updated_messages
+LIMIT 1;
 """
 
 
-async def extend_ack_deadline(
+async def extend_ack_deadlines(
     conn: PoolOrConnection,
     queue_name: str,
-    job_id: UUID,
-) -> datetime:
-    res: Optional[datetime] = await conn.fetchval(EXTEND_ACK_DEADLINE, queue_name, job_id)  # type: ignore
-    if res is None:
-        # message was acked while we were making the query
-        raise LookupError
-    return res
+    job_ids: Sequence[UUID],
+) -> Optional[datetime]:
+    return await conn.fetchval(EXTEND_ACK_DEADLINES, queue_name, list(job_ids))  # type: ignore
