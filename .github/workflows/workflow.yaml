@@ -47,8 +47,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          # will assign a random free host port
-          - 5432/tcp
+          - 5432:5432
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python }}
@@ -57,15 +56,11 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
-      - uses: valeriangalliat/action-sshd-cloudflared@v1
-        env:
-          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
       - name: Test
-        env:
-          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
         run: |
-          apt-get update && apt-get install -y make
-          make test
+          psql --host localhost --user postgres --db-name postgres -c "SELECT 1"
+          # apt-get update && apt-get install -y make
+          # make test
   version-check:
     name: Check Version Bump
     if: github.ref != 'refs/heads/main'
