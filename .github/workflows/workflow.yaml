@@ -57,6 +57,11 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
+      - name: Start SSH session
+        uses: luchihoratiu/debug-via-ssh@main
+        with:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          SSH_PASS: ${{ secrets.SSH_PASS }}
       - name: Test
         env:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
@@ -80,11 +85,6 @@ jobs:
           path: main
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.0
-      - name: Start SSH session
-        uses: luchihoratiu/debug-via-ssh@main
-        with:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-          SSH_PASS: ${{ secrets.SSH_PASS }}
       - name: Check version bump
         run: |
           cd $GITHUB_WORKSPACE/current
