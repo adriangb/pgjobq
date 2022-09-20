@@ -131,13 +131,11 @@ WITH msg AS (
         id
     FROM pgjobq.messages
     WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid
-), msg_notification AS (
-    SELECT pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
 )
 DELETE
 FROM pgjobq.messages
 WHERE pgjobq.messages.id = (SELECT id FROM msg)
-RETURNING (SELECT 1 FROM msg_notification) AS notified;
+RETURNING (SELECT pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))) AS notified;
 """
 
 
@@ -154,7 +152,8 @@ UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
+WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
+RETURNING (SELECT pg_notify('pgjobq.new_job', $1)) AS notified;
 """
 
 
@@ -164,7 +163,6 @@ async def nack_message(
     job_id: UUID,
 ) -> None:
     await conn.execute(NACK_MESSAGE, queue_name, job_id)  # type: ignore
-    await conn.execute("SELECT pg_notify('pgjobq.new_job', $1)", queue_name)  # type: ignore
 
 
 EXTEND_ACK_DEADLINES = """\
