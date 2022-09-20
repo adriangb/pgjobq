@@ -58,7 +58,7 @@ jobs:
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
       - name: Setup upterm session
-        uses: lhotari/action-upterm@v1
+        uses: mxschmitt/action-tmate@v3
       - name: Test
         env:
           POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
