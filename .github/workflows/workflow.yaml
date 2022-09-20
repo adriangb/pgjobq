@@ -58,7 +58,7 @@ jobs:
         uses: snok/install-poetry@v1.3.1
       - name: Test
         run: |
-          psql --host localhost --user postgres --database postgres -c "SELECT 1"
+          psql --host localhost --user postgres --dbname postgres -c "SELECT 1"
           # apt-get update && apt-get install -y make
           # make test
   version-check:
