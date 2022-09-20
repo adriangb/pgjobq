@@ -61,8 +61,8 @@ jobs:
       POSTGRES_HOST: postgres
     steps:
       - run: |
-          apt-get update && apt-get install -y postgresql-client
-          PGPASSWORD=postgres psql --host postges --dbname postgres --user postgres
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=postgres psql --host postgres --dbname postgres --user postgres
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python }}
         uses: actions/setup-python@v2
