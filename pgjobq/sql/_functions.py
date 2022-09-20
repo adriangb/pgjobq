@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timedelta
-from typing import Any, List, Mapping, Optional, Sequence, TypedDict, Union
+from typing import Any, List, Mapping, Optional, Sequence, Union
 from uuid import UUID
+
+if sys.version_info < (3, 8):
+    from typing_extensions import TypedDict
+else:
+    from typing import TypedDict
 
 import asyncpg  # type: ignore
 
