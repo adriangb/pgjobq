@@ -56,8 +56,11 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+      - name: Start SSH session
+        uses: luchihoratiu/debug-via-ssh@main
+        with:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+          SSH_PASS: ${{ secrets.SSH_PASS }}
       - name: Test
         run: |
           PGPASSWORD=postgres psql --host localhost --user postgres --dbname postgres -c "SELECT 1"
