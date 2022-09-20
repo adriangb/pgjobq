@@ -57,10 +57,11 @@ async def test_worker_raises_exception_in_job_handle(
                 async with job_handle as _:
                     raise MyException
 
-    with anyio.fail_after(1):  # redelivery should be immediate
-        async with queue.receive() as job_handle_iter:
-            async with await job_handle_iter.receive() as job:
-                assert job.body == b'{"foo":"bar"}', job.body
+    async with queue.receive() as job_handle_iter:
+        with anyio.fail_after(0.25):  # redelivery should be immediate
+            job_handle = await job_handle_iter.receive()
+        async with job_handle as job:
+            assert job.body == b'{"foo":"bar"}', job.body
 
 
 @pytest.mark.anyio
@@ -78,10 +79,11 @@ async def test_worker_raises_exception_before_job_handle_is_entered(
             async for _ in job_handle_iter:
                 raise MyException
 
-    with anyio.fail_after(1):  # redelivery should be immediate
-        async with queue.receive() as job_handle_iter:
-            async with await job_handle_iter.receive() as job:
-                assert job.body == b'{"foo":"bar"}', job.body
+    async with queue.receive() as job_handle_iter:
+        with anyio.fail_after(0.25):  # redelivery should be immediate
+            job_handle = await job_handle_iter.receive()
+        async with job_handle as job:
+            assert job.body == b'{"foo":"bar"}', job.body
 
 
 @pytest.mark.anyio
@@ -99,10 +101,11 @@ async def test_worker_raises_exception_in_poll_with_pending_jobs(
             await job_handle_iter.receive()
             raise MyException
 
-    with anyio.fail_after(1):  # redelivery should be immediate
-        async with queue.receive() as job_handle_iter:
-            async with await job_handle_iter.receive() as job:
-                assert job.body == b'{"foo":"bar"}', job.body
+    async with queue.receive() as job_handle_iter:
+        with anyio.fail_after(0.25):  # redelivery should be immediate
+            job_handle = await job_handle_iter.receive()
+        async with job_handle as job:
+            assert job.body == b'{"foo":"bar"}', job.body
 
 
 @pytest.mark.anyio
@@ -214,7 +217,7 @@ async def test_enqueue_with_delay(
             async for _ in job_handler_iter:
                 assert False, "should not be called"
 
-    await anyio.sleep(0.25)  # wait for the job to become available
+    await anyio.sleep(0.5)  # wait for the job to become available
 
     async with queue.receive() as job_handler_iter:
         with anyio.fail_after(0.05):  # we shouldn't have to wait anymore
@@ -342,7 +345,7 @@ async def test_batched_rcv_can_be_interrupted(
     n = 0
 
     for _ in range(2):
-        async with queue.send("{}".encode()):
+        async with queue.send(b"{}"):
             pass
 
     async with queue.receive(batch_size=2) as job_handle_stream:
@@ -354,9 +357,12 @@ async def test_batched_rcv_can_be_interrupted(
     assert n == 1  # only one job was processed
 
     # we can immediately process the other job because it was nacked
+    # when we exited the Queue.receive() context
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.5):
-            await job_handle_stream.receive()
+        with anyio.fail_after(0.25):  # redelivery should be immediate
+            job_handle = await job_handle_stream.receive()
+        async with job_handle as job:
+            assert job.body == b"{}", job.body
 
 
 @pytest.mark.anyio
