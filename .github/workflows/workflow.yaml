@@ -53,12 +53,6 @@ jobs:
       POSTGRES_HOST: postgres
     steps:
       - uses: actions/checkout@v2
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Install and configure Poetry
-        uses: snok/install-poetry@v1.3.1
       - name: Test
         run: |
           apt-get update && apt-get install -y make
