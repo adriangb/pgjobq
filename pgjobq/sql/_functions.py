@@ -179,7 +179,16 @@ WITH queue_info AS (
         id,
         available_at
     FROM pgjobq.messages
-    WHERE queue_id = (SELECT id FROM queue_info) AND id = any($2::uuid[])
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = any($2::uuid[])
+        AND
+        -- skip any jobs that already expired
+        -- this avoids race conditions between
+        -- extending acks and nacking
+        available_at > now()
+    )
     FOR UPDATE SKIP LOCKED
 ), updated_messages AS (
     UPDATE pgjobq.messages
