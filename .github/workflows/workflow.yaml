@@ -47,8 +47,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
         ports:
-          # will assign a random free host port
-          - 5432/tcp
+          - 5432:5432
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python }}
@@ -57,14 +56,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install and configure Poetry
         uses: snok/install-poetry@v1.3.1
-      - name: Start SSH session
-        uses: luchihoratiu/debug-via-ssh@main
-        with:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-          SSH_PASS: ${{ secrets.SSH_PASS }}
       - name: Test
-        env:
-          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }} # get randomly assigned published port
         run: |
           apt-get update && apt-get install -y make
           make test

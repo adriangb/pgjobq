@@ -171,45 +171,28 @@ WITH queue_info AS (
         id
     FROM pgjobq.queues
     WHERE name = $1
-), messages_for_update AS (
-    SELECT
-        queue_id,
-        id,
-        available_at
-    FROM pgjobq.messages
-    WHERE (
-        queue_id = (SELECT id FROM queue_info)
-        AND
-        id = any($2::uuid[])
-        AND
-        -- skip any jobs that already expired
-        -- this avoids race conditions between
-        -- extending acks and nacking
-        available_at > now()
-    )
-    ORDER BY id
-    FOR UPDATE SKIP LOCKED
-), updated_messages AS (
-    UPDATE pgjobq.messages
-    SET available_at = (
-        now() + (
-            SELECT ack_deadline
-            FROM pgjobq.queues
-            WHERE pgjobq.queues.id = (
-                SELECT id FROM queue_info
-            )
+)
+UPDATE pgjobq.messages
+SET available_at = (
+    now() + (
+        SELECT ack_deadline
+        FROM pgjobq.queues
+        WHERE pgjobq.queues.id = (
+            SELECT id FROM queue_info
         )
     )
-    WHERE (
-        pgjobq.messages.queue_id = (SELECT id FROM queue_info)
-        AND
-        pgjobq.messages.id IN (SELECT id FROM messages_for_update)
-    )
-    RETURNING available_at AS next_ack_deadline
 )
-SELECT next_ack_deadline
-FROM updated_messages
-LIMIT 1;
+WHERE (
+    queue_id = (SELECT id FROM queue_info)
+    AND
+    id = any($2::uuid[])
+    AND
+    -- skip any jobs that already expired
+    -- this avoids race conditions between
+    -- extending acks and nacking
+    available_at > now()
+)
+RETURNING available_at AS next_ack_deadline;
 """
 
 

@@ -59,12 +59,8 @@ async def test_worker_raises_exception_in_job_handle(
                     raise MyException
 
     async with queue.receive() as job_handle_iter:
-        # with anyio.fail_after(0.75):  # redelivery should be immediate
-        start = time()
-        job_handle = await job_handle_iter.receive()
-        end = time()
-        elapsed = end - start
-        assert elapsed < 0.5, elapsed
+        with anyio.fail_after(0.75):  # redelivery should be immediate
+            job_handle = await job_handle_iter.receive()
         async with job_handle as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
