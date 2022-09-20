@@ -62,7 +62,8 @@ async def test_worker_raises_exception_in_job_handle(
         start = time()
         job_handle = await job_handle_iter.receive()
         end = time()
-        print(f"Took {end-start:.2f} secs")
+        elapsed = end - start
+        assert elapsed < 0.75
         async with job_handle as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
