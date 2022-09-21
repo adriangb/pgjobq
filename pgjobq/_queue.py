@@ -47,7 +47,7 @@ class JobCompletionHandle:
                 tg.start_soon(event.wait)
 
 
-@dataclass(**DATACLASSES_KW)
+@dataclass(**DATACLASSES_KW, eq=False)
 class JobManager:
     pool: asyncpg.Pool
     message: Message
@@ -94,14 +94,6 @@ class JobManager:
                     )
         finally:
             self.terminated = True
-
-    # need to implement this since we override __hash__
-    # but it should never be called
-    def __eq__(self, *_: Any) -> bool:  # pragma: no cover
-        return False
-
-    def __hash__(self) -> int:
-        return id(self)
 
 
 @dataclass(**DATACLASSES_KW)
