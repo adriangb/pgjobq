@@ -11,9 +11,9 @@ from typing import (
     AsyncIterator,
     Dict,
     Hashable,
-    List,
     Mapping,
     Optional,
+    Sequence,
     Set,
 )
 from uuid import UUID, uuid4
@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 import anyio
 import asyncpg  # type: ignore
 
-from pgjobq.api import JobHandle, JobStream, Message
+from pgjobq.api import JobHandle, Message
 from pgjobq.api import Queue as AbstractQueue
 from pgjobq.api import SendCompletionHandle as AbstractCompletionHandle
 from pgjobq.sql._functions import (
@@ -118,22 +118,35 @@ class Queue(AbstractQueue):
         batch_size: int = 1,
         poll_interval: float = 1,
         fifo: bool = False,
-    ) -> AsyncIterator[JobStream]:
-        send, rcv = anyio.create_memory_object_stream(0, JobHandle)  # type: ignore
+    ) -> AsyncIterator[AsyncIterator[JobHandle]]:
 
         in_flight_jobs: Set[JobManager] = set()
         poll_id = uuid4()
         self.in_flight_jobs[poll_id] = in_flight_jobs
 
-        async def gather_jobs() -> None:
+        async def get_jobs() -> Sequence[JobManager]:
             jobs = await poll_for_messages(
                 self.pool,
                 queue_name=self.queue_name,
                 fifo=fifo,
                 batch_size=batch_size,
             )
+            managers = [
+                JobManager(
+                    pool=self.pool,
+                    message=Message(id=job["id"], body=job["body"]),
+                    queue_name=self.queue_name,
+                    pending_jobs=in_flight_jobs,
+                )
+                for job in jobs
+            ]
+            in_flight_jobs.update(managers)
+            return managers
+
+        async def gather_jobs() -> AsyncIterator[JobHandle]:
             while True:
-                while not jobs:
+                managers = await get_jobs()
+                while not managers:
                     continue_to_next_iter = anyio.Event()
                     # wait for a new job to be published or the poll interval to expire
 
@@ -152,42 +165,13 @@ class Queue(AbstractQueue):
                         self.new_job_callbacks[self.queue_name].discard(
                             continue_to_next_iter
                         )
-
-                    jobs = await poll_for_messages(
-                        self.pool,
-                        queue_name=self.queue_name,
-                        fifo=fifo,
-                        batch_size=batch_size,
-                    )
-
-                managers: List[JobManager] = []
-
-                # start extending ack deadlines before handing control over to workers
-                # so that processing each job takes > ack deadline messages aren't lost
-                for job in jobs:
-                    message = Message(id=job["id"], body=job["body"])
-                    manager = JobManager(
-                        pool=self.pool,
-                        message=message,
-                        queue_name=self.queue_name,
-                        pending_jobs=in_flight_jobs,
-                    )
-                    managers.append(manager)
-                    in_flight_jobs.add(manager)
+                    managers = await get_jobs()
 
                 for manager in managers:
-                    await send.send(manager.wrap_worker())
-
-                jobs = ()
+                    yield manager.wrap_worker()
 
         try:
-            async with anyio.create_task_group() as poll_tg:
-                poll_tg.start_soon(gather_jobs)
-                try:
-                    yield rcv
-                finally:
-                    # stop polling
-                    poll_tg.cancel_scope.cancel()
+            yield gather_jobs()
         finally:
             self.in_flight_jobs.pop(poll_id)
             async with anyio.create_task_group() as termination_tg:
