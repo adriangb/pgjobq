@@ -24,8 +24,6 @@ WITH queue_info AS (
         max_delivery_attempts
     FROM pgjobq.queues
     WHERE name = $1
-), published_notification AS (
-    SELECT pg_notify('pgjobq.new_job', $1)
 )
 INSERT INTO pgjobq.messages(
     queue_id,
@@ -45,8 +43,9 @@ SELECT
     now() + COALESCE($4, '0 seconds'::interval),
     unnest($3::bytea[])
 FROM queue_info
-LEFT JOIN published_notification ON 1 = 1
-RETURNING 1;  -- NULL if the queue doesn't exist
+RETURNING (
+    SELECT 'true'::bool FROM pg_notify('pgjobq.new_job', $1)
+);  -- NULL if the queue doesn't exist
 """
 
 
@@ -132,16 +131,14 @@ WITH msg AS (
         id
     FROM pgjobq.messages
     WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid
-), msg_notification AS (
-    SELECT pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
 )
 DELETE
 FROM pgjobq.messages
-WHERE (
-    pgjobq.messages.id = (SELECT id FROM msg)
-    AND
-    1 = (SELECT 1 FROM msg_notification)
-);
+WHERE pgjobq.messages.id = (SELECT id FROM msg)
+RETURNING (
+    SELECT
+        pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
+) AS notified;
 """
 
 
@@ -154,14 +151,12 @@ async def ack_message(
 
 
 NACK_MESSAGE = """\
-WITH msg AS (
-    SELECT pg_notify('pgjobq.new_job', $1)
-)
 UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2 AND 1 = (SELECT 1 FROM msg);
+WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
+RETURNING (SELECT pg_notify('pgjobq.new_job', $1));
 """
 
 
@@ -176,48 +171,29 @@ async def nack_message(
 EXTEND_ACK_DEADLINES = """\
 WITH queue_info AS (
     SELECT
-        id
+        id,
+        ack_deadline
     FROM pgjobq.queues
     WHERE name = $1
-), messages_for_update AS (
-    SELECT
-        queue_id,
-        id,
-        available_at
-    FROM pgjobq.messages
-    WHERE (
-        queue_id = (SELECT id FROM queue_info)
-        AND
-        id = any($2::uuid[])
-        AND
-        -- skip any jobs that already expired
-        -- this avoids race conditions between
-        -- extending acks and nacking
-        available_at > now()
-    )
-    ORDER BY id
-    FOR UPDATE SKIP LOCKED
-), updated_messages AS (
-    UPDATE pgjobq.messages
-    SET available_at = (
-        now() + (
-            SELECT ack_deadline
-            FROM pgjobq.queues
-            WHERE pgjobq.queues.id = (
-                SELECT id FROM queue_info
-            )
-        )
-    )
-    WHERE (
-        pgjobq.messages.queue_id = (SELECT id FROM queue_info)
-        AND
-        pgjobq.messages.id IN (SELECT id FROM messages_for_update)
-    )
-    RETURNING available_at AS next_ack_deadline
 )
-SELECT next_ack_deadline
-FROM updated_messages
-LIMIT 1;
+UPDATE pgjobq.messages
+SET available_at = (
+    now() + (
+        SELECT ack_deadline
+        FROM queue_info
+    )
+)
+WHERE (
+    queue_id = (SELECT id FROM queue_info)
+    AND
+    id = any($2::uuid[])
+    AND
+    -- skip any jobs that already expired
+    -- this avoids race conditions between
+    -- extending acks and nacking
+    available_at > now()
+)
+RETURNING available_at AS next_ack_deadline;
 """
 
 

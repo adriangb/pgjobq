@@ -4,7 +4,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, AsyncContextManager, Dict, Mapping, Optional
+from typing import Any, AsyncContextManager, AsyncIterator, Dict, Mapping, Optional
 from uuid import UUID
 
 if sys.version_info < (3, 8):  # pragma: no cover
@@ -28,17 +28,6 @@ class Message:
 JobHandle = AsyncContextManager[Message]
 
 
-class JobStream(Protocol):
-    def __aiter__(self) -> JobStream:
-        ...
-
-    async def __anext__(self) -> JobHandle:
-        ...
-
-    async def receive(self) -> JobHandle:
-        ...
-
-
 class SendCompletionHandle(Protocol):
     @property
     def jobs(self) -> Mapping[UUID, anyio.Event]:
@@ -57,7 +46,7 @@ class Queue(ABC):
         batch_size: int = 1,
         poll_interval: float = 1,
         fifo: bool = False,
-    ) -> AsyncContextManager[JobStream]:
+    ) -> AsyncContextManager[AsyncIterator[JobHandle]]:
         """Poll for a batch of jobs.
 
         Will wait until at least one and up to `batch_size` jobs are available
