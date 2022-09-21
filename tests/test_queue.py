@@ -1,6 +1,6 @@
 from datetime import timedelta
 from time import time
-from typing import AsyncContextManager, AsyncGenerator, List
+from typing import AsyncGenerator, List
 
 import anyio
 import asyncpg  # type: ignore
@@ -8,6 +8,7 @@ import pytest
 from anyio.abc import TaskStatus
 
 from pgjobq import Queue, connect_to_queue, create_queue
+from pgjobq.api import JobHandle
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ async def test_completion_handle_ignored(
         pass
 
     async with queue.receive() as job_handle_stream:
-        async with await job_handle_stream.__anext__() as job:
+        async with (await job_handle_stream.receive()).acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
 
@@ -37,7 +38,7 @@ async def test_worker_takes_longer_than_ack_interval(
         pass
 
     async with queue.receive() as job_handle_stream:
-        async with await job_handle_stream.__anext__() as job:
+        async with (await job_handle_stream.receive()).acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
             await anyio.sleep(1)  # default ack interval
 
@@ -55,13 +56,13 @@ async def test_worker_raises_exception_in_job_handle(
     with pytest.raises(MyException):
         async with queue.receive() as job_handle_stream:
             async for job_handle in job_handle_stream:
-                async with job_handle as _:
+                async with job_handle.acquire() as _:
                     raise MyException
 
     async with queue.receive() as job_handle_stream:
         with anyio.fail_after(0.75):  # redelivery should be immediate
-            job_handle = await job_handle_stream.__anext__()
-        async with job_handle as job:
+            job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
 
@@ -82,8 +83,8 @@ async def test_worker_raises_exception_before_job_handle_is_entered(
 
     async with queue.receive() as job_handle_stream:
         with anyio.fail_after(0.75):  # redelivery should be immediate
-            job_handle = await job_handle_stream.__anext__()
-        async with job_handle as job:
+            job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
 
@@ -99,13 +100,13 @@ async def test_worker_raises_exception_in_poll_with_pending_jobs(
 
     with pytest.raises(MyException):
         async with queue.receive() as job_handle_stream:
-            await job_handle_stream.__anext__()
+            await job_handle_stream.receive()
             raise MyException
 
     async with queue.receive() as job_handle_stream:
         with anyio.fail_after(0.75):  # redelivery should be immediate
-            job_handle = await job_handle_stream.__anext__()
-        async with job_handle as job:
+            job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
 
@@ -113,22 +114,49 @@ async def test_worker_raises_exception_in_poll_with_pending_jobs(
 async def test_start_job_after_poll_exited(
     queue: Queue,
 ) -> None:
-    class MyException(Exception):
+    async with queue.send(b'{"foo":"bar"}'):
         pass
+
+    async with queue.receive() as job_handle_stream:
+        job_handle = await job_handle_stream.receive()
+
+    with pytest.raises(RuntimeError, match="job is no longer available"):
+        async with job_handle.acquire():  # type: ignore
+            assert False, "should not be called"  # pragma: no cover
+
+
+@pytest.mark.anyio
+async def test_start_job_twice(
+    queue: Queue,
+) -> None:
 
     async with queue.send(b'{"foo":"bar"}'):
         pass
 
-    with pytest.raises(MyException):
-        async with queue.receive() as job_handle_stream:
-            job_handle = await job_handle_stream.__anext__()
-            raise MyException
+    async with queue.receive() as job_handle_stream:
+        job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire():
+            pass
+            with pytest.raises(RuntimeError, match="already being processed"):
+                async with job_handle.acquire():
+                    pass
 
-    with pytest.raises(
-        RuntimeError, match="completed, failed or is no longer available"
-    ):
-        async with job_handle:  # type: ignore
-            assert False, "should not be called"  # pragma: no cover
+
+@pytest.mark.anyio
+async def test_start_completed_job_handle(
+    queue: Queue,
+) -> None:
+
+    async with queue.send(b'{"foo":"bar"}'):
+        pass
+
+    async with queue.receive() as job_handle_stream:
+        job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire():
+            pass
+        with pytest.raises(RuntimeError, match="already completed"):
+            async with job_handle.acquire():
+                pass
 
 
 @pytest.mark.anyio
@@ -142,8 +170,8 @@ async def test_execute_jobs_concurrently(
         "test-queue", migrated_pool, ack_deadline=timedelta(seconds=ack_deadline)
     )
 
-    async def fake_job_work(msg_handle: AsyncContextManager[None]) -> None:
-        async with msg_handle:
+    async def fake_job_work(job_handle: JobHandle) -> None:
+        async with job_handle.acquire():
             await anyio.sleep(0.25)
 
     async with connect_to_queue("test-queue", migrated_pool) as queue:
@@ -176,10 +204,10 @@ async def test_concurrent_worker_pull_atomic_delivery(
         async with connect_to_queue("test-queue", migrated_pool) as queue:
             async with queue.receive() as job_handle_stream:
                 task_status.started()
-                async for job_handler in job_handle_stream:
+                async for job_handle in job_handle_stream:
                     pulls.append(name)
                     with anyio.CancelScope(shield=True):
-                        async with job_handler:
+                        async with job_handle.acquire():
                             # let other workers try to grab the job
                             await anyio.sleep(ack_deadline * 1.25)
 
@@ -190,7 +218,6 @@ async def test_concurrent_worker_pull_atomic_delivery(
         async with connect_to_queue("test-queue", migrated_pool) as queue:
             async with queue.send(b"{}") as completion_handle:
                 await completion_handle()
-                print(1)
         tg.cancel_scope.cancel()
 
     # we check that the message was only received and processed once
@@ -214,8 +241,8 @@ async def test_enqueue_with_delay(
 
     async with queue.receive() as job_handle_stream:
         with anyio.fail_after(0.05):  # we shouldn't have to wait anymore
-            job_handler = await job_handle_stream.__anext__()
-        async with job_handler as job:
+            job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
 
 
@@ -229,7 +256,7 @@ async def test_completion_handle_awaited(
 
         async def worker() -> None:
             async with queue.receive() as job_handle_stream:
-                async with await job_handle_stream.__anext__():
+                async with (await job_handle_stream.receive()).acquire():
                     events.append("received")
                 events.append("acked")
 
@@ -256,8 +283,8 @@ async def test_new_message_notification_triggers_poll(
     async with anyio.create_task_group() as tg:
 
         async def worker() -> None:
-            async with queue.receive(poll_interval=60) as job_iter:
-                await job_iter.__anext__()
+            async with queue.receive(poll_interval=60) as job_handle_stream:
+                await job_handle_stream.receive()
                 rcv_times.append(time())
             return
 
@@ -285,7 +312,7 @@ async def test_batched_rcv(queue: Queue, total_messages: int) -> None:
 
     async with queue.receive(batch_size=2) as job_handle_stream:
         for _ in range(total_messages):
-            await job_handle_stream.__anext__()
+            await job_handle_stream.receive()
 
 
 @pytest.mark.anyio
@@ -294,12 +321,12 @@ async def test_batched_send(queue: Queue) -> None:
 
     async def worker() -> None:
         async with queue.receive() as job_handle_stream:
-            async with await job_handle_stream.__anext__():
+            async with (await job_handle_stream.receive()).acquire():
                 pass
                 events.append("processed")
             # make sure we're not just faster than the completion handle
             await anyio.sleep(0.05)
-            async with await job_handle_stream.__anext__():
+            async with (await job_handle_stream.receive()).acquire():
                 pass
                 events.append("processed")
 
@@ -324,7 +351,7 @@ async def test_batched_rcv_can_be_interrupted(
 
     async with queue.receive(batch_size=2) as job_handle_stream:
         async for job_handle in job_handle_stream:
-            async with job_handle:
+            async with job_handle.acquire():
                 n += 1
             break
 
@@ -334,8 +361,8 @@ async def test_batched_rcv_can_be_interrupted(
     # when we exited the Queue.receive() context
     async with queue.receive() as job_handle_stream:
         with anyio.fail_after(0.75):  # redelivery should be immediate
-            job_handle = await job_handle_stream.__anext__()
-        async with job_handle as job:
+            job_handle = await job_handle_stream.receive()
+        async with job_handle.acquire() as job:
             assert job.body == b"{}", job.body
 
 

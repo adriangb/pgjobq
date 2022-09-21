@@ -48,7 +48,7 @@ async def main() -> None:
             async def worker() -> None:
                 async with queue.receive() as msg_handle_rcv_stream:
                     # receive a single message
-                    async with await msg_handle_rcv_stream.__anext__():
+                    async with (await msg_handle_rcv_stream.receive()).acquire():
                         print("received")
                         # do some work
                         await anyio.sleep(1)

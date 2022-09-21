@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, List, Mapping, Optional, Sequence, Union
 from uuid import UUID
 
-if sys.version_info < (3, 8):
+if sys.version_info < (3, 8):  # pragma: no cover
     from typing_extensions import TypedDict
 else:
     from typing import TypedDict
@@ -96,8 +96,9 @@ UPDATE pgjobq.messages
 SET
     available_at = now() + (SELECT ack_deadline FROM queue_info),
     delivery_attempts_remaining = delivery_attempts_remaining - 1
-WHERE pgjobq.messages.id IN (SELECT id FROM selected_messages)
-RETURNING pgjobq.messages.id AS id, available_at AS next_ack_deadline, body
+FROM selected_messages
+WHERE pgjobq.messages.id = selected_messages.id
+RETURNING pgjobq.messages.id AS id, available_at AS next_ack_deadline, body;
 """
 
 

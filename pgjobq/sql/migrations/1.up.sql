@@ -26,15 +26,16 @@ create table pgjobq.messages (
     body bytea not null
 ) PARTITION BY LIST(queue_id);
 
--- Index for ackinc/nacknig messages
+-- Index for ackinc/nacknig messages within a partition
 CREATE INDEX "pgjobq.messages_id_idx" ON pgjobq.messages(id);
 
 -- Indexes for looking for expired messages and available messages
 CREATE INDEX "pgjobq.messages_available_idx"
-ON pgjobq.messages USING BRIN(available_at);
+ON pgjobq.messages(available_at);
 
 CREATE INDEX "pgjobq.messages_expiration_idx"
-ON pgjobq.messages(delivery_attempts_remaining, expires_at) WHERE delivery_attempts_remaining = 0;
+ON pgjobq.messages(delivery_attempts_remaining, expires_at)
+WHERE delivery_attempts_remaining = 0;
 
 CREATE FUNCTION pgjobq.create_queue(
     queue_name varchar(32),
