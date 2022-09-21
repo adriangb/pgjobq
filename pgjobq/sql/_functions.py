@@ -250,9 +250,36 @@ async def get_statistics(
     return record
 
 
+GET_COMPLETED_JOBS = """\
+WITH input AS (
+    SELECT
+        id
+    FROM unnest($2::uuid[]) AS t(id)
+), queue_info AS (
+    SELECT
+        id
+    FROM pgjobq.queues
+    WHERE name = $1
+)
+SELECT
+    id
+FROM input
+WHERE NOT EXISTS(
+    SELECT *
+    FROM pgjobq.messages
+    WHERE (
+        pgjobq.messages.id = input.id
+        AND
+        pgjobq.messages.queue_id = (SELECT id FROM queue_info)
+    )
+)
+"""
+
+
 async def get_completed_jobs(
     conn: PoolOrConnection,
     queue_name: str,
     job_ids: List[UUID],
 ) -> Sequence[UUID]:
-    ...
+    records: List[Record] = await conn.fetch(GET_COMPLETED_JOBS, queue_name, job_ids)  # type: ignore
+    return [record["id"] for record in records]

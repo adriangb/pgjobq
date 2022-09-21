@@ -132,7 +132,7 @@ class Queue(ABC):
         Returns:
             AsyncContextManager[CompletionHandle]: A context manager that returns a completion handle.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     async def get_statistics(self) -> QueueStatistics:
@@ -141,4 +141,4 @@ class Queue(ABC):
         Returns:
             QueueStatistics: information on the current state of the queue.
         """
-        pass
+        pass  # pragma: no cover

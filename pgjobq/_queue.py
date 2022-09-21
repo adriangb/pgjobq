@@ -260,7 +260,7 @@ class Queue(AbstractQueue):
                     # wait for a completion notification or poll interval to expire
 
                     async def set_new_completion(
-                        job_id: UUID, event: anyio.Event, tg: TaskGroup
+                        event: anyio.Event, tg: TaskGroup
                     ) -> None:
                         await event.wait()
                         new_completion.set()
@@ -270,6 +270,7 @@ class Queue(AbstractQueue):
                         for event in done_events.values():
                             tg.start_soon(set_new_completion, event, tg)
                         await anyio.sleep(interval)
+                        tg.cancel_scope.cancel()
 
                     if not new_completion.is_set():
                         # poll
@@ -285,7 +286,7 @@ class Queue(AbstractQueue):
 
             try:
                 async with anyio.create_task_group() as tg:
-                    if poll_interval:
+                    if poll_interval is not None:
                         tg.start_soon(
                             poll_for_completion, poll_interval.total_seconds()
                         )

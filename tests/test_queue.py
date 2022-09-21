@@ -1,6 +1,7 @@
 from datetime import timedelta
 from time import time
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Set
+from uuid import UUID
 
 import anyio
 import asyncpg  # type: ignore
@@ -434,3 +435,68 @@ async def test_queue_statistics(
     stats = await queue.get_statistics()
     expected = QueueStatistics(total_messages_in_queue=0, undelivered_messages=0)
     assert stats == expected
+
+
+@pytest.mark.anyio
+async def test_get_completed_jobs_in_flight(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+
+    await create_queue("test-queue", migrated_pool)
+
+    ids: Set[UUID] = set()
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.send(b"{}") as handle:
+            ids.update(handle.jobs.keys())
+        async with queue.send(b"{}") as handle:
+            ids.update(handle.jobs.keys())
+
+        # complete one of the two jobs
+        # we won't get a notification for this one
+        async with queue.receive() as job_handle_stream:
+            async with (await job_handle_stream.receive()).acquire():
+                pass
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.wait_for_completion(
+            *ids, poll_interval=timedelta(seconds=1)
+        ) as handle:
+            with anyio.fail_after(5):  # fail fast during tests
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(handle)
+                    # process the other job
+                    async with queue.receive() as job_handle_stream:
+                        async with (await job_handle_stream.receive()).acquire():
+                            pass
+
+
+@pytest.mark.anyio
+async def test_wait_for_completion_instant_poll(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+
+    await create_queue("test-queue", migrated_pool)
+
+    ids: Set[UUID] = set()
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.send(b"{}") as handle:
+            ids.update(handle.jobs.keys())
+        async with queue.send(b"{}") as handle:
+            ids.update(handle.jobs.keys())
+        # complete both jobs
+        async with queue.receive() as job_handle_stream:
+            async with (await job_handle_stream.receive()).acquire():
+                pass
+        async with queue.receive() as job_handle_stream:
+            async with (await job_handle_stream.receive()).acquire():
+                pass
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.wait_for_completion(
+            *ids, poll_interval=timedelta(seconds=0)
+        ) as handle:
+            # fail fast during tests, this should be near instant
+            with anyio.fail_after(1):
+                await handle()
