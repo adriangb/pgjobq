@@ -8,15 +8,13 @@ A job queue built on top of Postgres.
 * Automatic redelivery of failed jobs
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Completion tracking (using `NOTIFY`)
+* Bulk sending and receiving
 * Fully typed async Python client (using [asyncpg])
-* Optional FIFO queuing
 * Persistent scheduled jobs (scheduled in the database, not the client application)
 
 Possible features:
 
-* Bulk sending
 * Exponential backoffs
-* Maybe more efficient continuous polling?
 
 Unplanned features:
 
@@ -32,7 +30,6 @@ import anyio
 import asyncpg  # type: ignore
 from pgjobq import create_queue, connect_to_queue, migrate_to_latest_version
 
-
 async def main() -> None:
 
     async with AsyncExitStack() as stack:
@@ -43,24 +40,25 @@ async def main() -> None:
         )
         await migrate_to_latest_version(pool)
         await create_queue("myq", pool)
-        (send, rcv) = await stack.enter_async_context(
+        queue = await stack.enter_async_context(
             connect_to_queue("myq", pool)
         )
         async with anyio.create_task_group() as tg:
 
             async def worker() -> None:
-                async for msg_handle in rcv.poll():
-                    async with msg_handle:
+                async with queue.receive() as msg_handle_rcv_stream:
+                    # receive a single message
+                    async with await msg_handle_rcv_stream.__anext__():
                         print("received")
                         # do some work
                         await anyio.sleep(1)
                         print("done processing")
-                    print("acked")
+                        print("acked")
 
             tg.start_soon(worker)
             tg.start_soon(worker)
 
-            async with send.send(b'{"foo":"bar"}') as completion_handle:
+            async with queue.send(b'{"foo":"bar"}') as completion_handle:
                 print("sent")
                 await completion_handle()
                 print("completed")
