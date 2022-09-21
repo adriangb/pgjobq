@@ -33,6 +33,16 @@ class Message:
     body: bytes
 
 
+@dataclass(frozen=True, **_DATACLASSES_KW)
+class QueueStatistics:
+    # total number of messages currently in the queue
+    total_messages_in_queue: int
+    # total number of messages that have never been delivered
+    # does not include messages that have been delivered and nacked
+    # or are pending re-delivery
+    undelivered_messages: int
+
+
 class JobHandle(Protocol):
     def acquire(self) -> AsyncContextManager[Message]:
         ...
@@ -105,3 +115,12 @@ class Queue(ABC):
             AsyncContextManager[JobCompletionHandle]
         """
         pass  # pragma: no cover
+
+    @abstractmethod
+    async def get_statistics(self) -> QueueStatistics:
+        """Gather statistics from the queue.
+
+        Returns:
+            QueueStatistics: information on the current state of the queue.
+        """
+        pass

@@ -28,10 +28,12 @@ from pgjobq.api import JobHandle
 from pgjobq.api import JobHandleStream as AbstractJobHandleStream
 from pgjobq.api import Message
 from pgjobq.api import Queue as AbstractQueue
+from pgjobq.api import QueueStatistics
 from pgjobq.api import SendCompletionHandle as AbstractCompletionHandle
 from pgjobq.sql._functions import (
     ack_message,
     extend_ack_deadlines,
+    get_statistics,
     nack_message,
     poll_for_messages,
     publish_messages,
@@ -239,6 +241,13 @@ class Queue(AbstractQueue):
                         self.completion_callbacks[self.queue_name].pop(job_id)
 
         return cm()
+
+    async def get_statistics(self) -> QueueStatistics:
+        record = await get_statistics(self.pool, self.queue_name)
+        return QueueStatistics(
+            total_messages_in_queue=record["current_message_count"],
+            undelivered_messages=record["undelivered_message_count"],
+        )
 
 
 @asynccontextmanager

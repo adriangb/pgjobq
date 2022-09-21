@@ -8,7 +8,7 @@ import pytest
 from anyio.abc import TaskStatus
 
 from pgjobq import Queue, connect_to_queue, create_queue
-from pgjobq.api import JobHandle
+from pgjobq.api import JobHandle, QueueStatistics
 
 
 @pytest.fixture
@@ -388,3 +388,50 @@ async def test_receive_from_non_existent_queue_allowed(
                 async for _ in job_handle_stream:
                     assert False, "should not be called"  # pragma: no cover
             assert scope.cancel_called is True
+
+
+@pytest.mark.anyio
+async def test_queue_statistics(
+    queue: Queue,
+) -> None:
+
+    stats = await queue.get_statistics()
+    expected = QueueStatistics(total_messages_in_queue=0, undelivered_messages=0)
+    assert stats == expected
+
+    async with queue.send(b"{}"):
+        pass
+    async with queue.send(b"{}"):
+        pass
+
+    stats = await queue.get_statistics()
+    expected = QueueStatistics(total_messages_in_queue=2, undelivered_messages=2)
+    assert stats == expected
+
+    async with queue.receive() as job_handle_stream:
+        await job_handle_stream.receive()
+
+    stats = await queue.get_statistics()
+    expected = QueueStatistics(total_messages_in_queue=2, undelivered_messages=1)
+    assert stats == expected
+
+    async with queue.receive() as job_handle_stream:
+        async with (await job_handle_stream.receive()).acquire():
+            pass
+
+    stats = await queue.get_statistics()
+    expected_options = (
+        # we just received and acked the message we had NOT already received
+        QueueStatistics(total_messages_in_queue=1, undelivered_messages=1),
+        # we just received and acked the message we had already received
+        QueueStatistics(total_messages_in_queue=1, undelivered_messages=0),
+    )
+    assert stats in expected_options
+
+    async with queue.receive() as job_handle_stream:
+        async with (await job_handle_stream.receive()).acquire():
+            pass
+
+    stats = await queue.get_statistics()
+    expected = QueueStatistics(total_messages_in_queue=0, undelivered_messages=0)
+    assert stats == expected

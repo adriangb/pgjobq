@@ -16,19 +16,28 @@ PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
 Record = Mapping[str, Any]
 
 
+class QueueDoesNotExist(LookupError):
+    def __init__(self, *, queue_name: str) -> None:
+        super().__init__(f"Queue not found: there is no queue named {queue_name}")
+
+
 PUBLISH_MESSAGES = """\
 WITH queue_info AS (
-    SELECT
+    UPDATE pgjobq.queues
+    SET
+        current_message_count = current_message_count + array_length($2::uuid[], 1),
+        undelivered_message_count = undelivered_message_count + array_length($2::uuid[], 1)
+    WHERE name = $1
+    RETURNING
         id AS queue_id,
         retention_period,
         max_delivery_attempts
-    FROM pgjobq.queues
-    WHERE name = $1
 )
 INSERT INTO pgjobq.messages(
     queue_id,
     id,
     expires_at,
+    max_delivery_attempts,
     delivery_attempts_remaining,
     available_at,
     body
@@ -37,6 +46,7 @@ SELECT
     queue_id,
     unnest($2::uuid[]),
     now() + retention_period,
+    max_delivery_attempts,
     max_delivery_attempts,
     -- set next ack to now
     -- somewhat meaningless but avoids nulls
@@ -65,7 +75,7 @@ async def publish_messages(
         delay,
     )
     if res is None:
-        raise LookupError(f"Queue not found: there is no queue named {queue_name}")
+        raise QueueDoesNotExist(queue_name=queue_name)
 
 
 POLL_FOR_MESSAGES = """\
@@ -77,7 +87,8 @@ WITH queue_info AS (
     WHERE name = $1
 ), selected_messages AS (
     SELECT
-        id
+        id,
+        (SELECT delivery_attempts_remaining = max_delivery_attempts)::int AS first_delivery
     FROM pgjobq.messages
     WHERE (
         delivery_attempts_remaining != 0
@@ -91,6 +102,11 @@ WITH queue_info AS (
     ORDER BY id
     FOR UPDATE SKIP LOCKED
     LIMIT $2
+), updated_queue_info AS (
+    UPDATE pgjobq.queues
+    SET
+        undelivered_message_count = undelivered_message_count - (SELECT sum(first_delivery) FROM selected_messages)
+    WHERE id = (SELECT id FROM queue_info)
 )
 UPDATE pgjobq.messages
 SET
@@ -122,11 +138,18 @@ async def poll_for_messages(
 
 
 ACK_MESSAGE = """\
-WITH msg AS (
+WITH queue_info AS (
+    UPDATE pgjobq.queues
+    SET
+        current_message_count = current_message_count - 1
+    WHERE name = $1
+    RETURNING
+        id
+), msg AS (
     SELECT
         id
     FROM pgjobq.messages
-    WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2::uuid
+    WHERE queue_id = (SELECT id FROM queue_info) AND id = $2::uuid
 )
 DELETE
 FROM pgjobq.messages
@@ -199,3 +222,29 @@ async def extend_ack_deadlines(
     job_ids: Sequence[UUID],
 ) -> Optional[datetime]:
     return await conn.fetchval(EXTEND_ACK_DEADLINES, queue_name, list(job_ids))  # type: ignore
+
+
+GET_STATISTICS = """\
+SELECT
+    current_message_count,
+    undelivered_message_count
+FROM pgjobq.queues
+WHERE name = $1
+"""
+
+
+class QueueStatisticsRecord(TypedDict):
+    current_message_count: int
+    undelivered_message_count: int
+
+
+async def get_statistics(
+    conn: PoolOrConnection,
+    queue_name: str,
+) -> QueueStatisticsRecord:
+    record: Optional[QueueStatisticsRecord] = await conn.fetchrow(  # type: ignore
+        GET_STATISTICS, queue_name
+    )
+    if record is None:
+        raise QueueDoesNotExist(queue_name=queue_name)
+    return record
