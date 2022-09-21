@@ -220,25 +220,6 @@ async def test_enqueue_with_delay(
 
 
 @pytest.mark.anyio
-async def test_pull_fifo(
-    queue: Queue,
-) -> None:
-    async with queue.send(b"1"):
-        pass
-
-    async with queue.send(b"2"):
-        pass
-
-    async with queue.receive() as job_handle_stream:
-        async with await job_handle_stream.__anext__() as job:
-            assert job.body == b"1"
-
-    async with queue.receive() as job_handle_stream:
-        async with await job_handle_stream.__anext__() as job:
-            assert job.body == b"2"
-
-
-@pytest.mark.anyio
 async def test_completion_handle_awaited(
     queue: Queue,
 ) -> None:

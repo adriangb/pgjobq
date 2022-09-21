@@ -117,7 +117,6 @@ class Queue(AbstractQueue):
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
-        fifo: bool = False,
     ) -> AsyncIterator[AsyncIterator[JobHandle]]:
 
         in_flight_jobs: Set[JobManager] = set()
@@ -128,7 +127,6 @@ class Queue(AbstractQueue):
             jobs = await poll_for_messages(
                 self.pool,
                 queue_name=self.queue_name,
-                fifo=fifo,
                 batch_size=batch_size,
             )
             managers = [

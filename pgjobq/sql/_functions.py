@@ -68,7 +68,7 @@ async def publish_messages(
         raise LookupError(f"Queue not found: there is no queue named {queue_name}")
 
 
-_POLL_FOR_MESSAGES = """\
+POLL_FOR_MESSAGES = """\
 WITH queue_info AS (
     SELECT
         id,
@@ -88,7 +88,7 @@ WITH queue_info AS (
         AND
         queue_id = (SELECT id FROM queue_info)
     )
-    {order_by}
+    ORDER BY id
     FOR UPDATE SKIP LOCKED
     LIMIT $2
 )
@@ -99,9 +99,6 @@ SET
 WHERE pgjobq.messages.id IN (SELECT id FROM selected_messages)
 RETURNING pgjobq.messages.id AS id, available_at AS next_ack_deadline, body
 """
-
-POLL_FOR_MESSAGES = _POLL_FOR_MESSAGES.format(order_by="")
-POLL_FOR_MESSAGES_FIFO = _POLL_FOR_MESSAGES.format(order_by="ORDER BY id")
 
 
 class JobRecord(TypedDict):
@@ -115,11 +112,9 @@ async def poll_for_messages(
     *,
     queue_name: str,
     batch_size: int,
-    fifo: bool,
 ) -> Sequence[JobRecord]:
-    query = POLL_FOR_MESSAGES_FIFO if fifo else POLL_FOR_MESSAGES
     return await conn.fetch(  # type: ignore
-        query,
+        POLL_FOR_MESSAGES,
         queue_name,
         batch_size,
     )

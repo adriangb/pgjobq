@@ -45,7 +45,6 @@ class Queue(ABC):
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
-        fifo: bool = False,
     ) -> AsyncContextManager[AsyncIterator[JobHandle]]:
         """Poll for a batch of jobs.
 
