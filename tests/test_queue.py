@@ -190,6 +190,7 @@ async def test_concurrent_worker_pull_atomic_delivery(
         async with connect_to_queue("test-queue", migrated_pool) as queue:
             async with queue.send(b"{}") as completion_handle:
                 await completion_handle()
+                print(1)
         tg.cancel_scope.cancel()
 
     # we check that the message was only received and processed once

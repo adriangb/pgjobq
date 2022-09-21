@@ -43,7 +43,9 @@ SELECT
     now() + COALESCE($4, '0 seconds'::interval),
     unnest($3::bytea[])
 FROM queue_info
-RETURNING queue_id;  -- NULL if the queue doesn't exist
+RETURNING (
+    SELECT 'true'::bool FROM pg_notify('pgjobq.new_job', $1)
+);  -- NULL if the queue doesn't exist
 """
 
 
@@ -64,7 +66,6 @@ async def publish_messages(
     )
     if res is None:
         raise LookupError(f"Queue not found: there is no queue named {queue_name}")
-    await conn.execute("SELECT pg_notify('pgjobq.new_job', $1)", queue_name)  # type: ignore
 
 
 _POLL_FOR_MESSAGES = """\
@@ -133,7 +134,11 @@ WITH msg AS (
 )
 DELETE
 FROM pgjobq.messages
-WHERE pgjobq.messages.id = (SELECT id FROM msg);
+WHERE pgjobq.messages.id = (SELECT id FROM msg)
+RETURNING (
+    SELECT
+        pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
+) AS notified;
 """
 
 
@@ -143,11 +148,6 @@ async def ack_message(
     job_id: UUID,
 ) -> None:
     await conn.execute(ACK_MESSAGE, queue_name, job_id)  # type: ignore
-    await conn.execute(  # type: ignore
-        "SELECT pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))",
-        queue_name,
-        job_id,
-    )
 
 
 NACK_MESSAGE = """\
@@ -155,7 +155,8 @@ UPDATE pgjobq.messages
 -- make it available in the past to avoid race conditions with extending acks
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2;
+WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
+RETURNING (SELECT pg_notify('pgjobq.new_job', $1));
 """
 
 
@@ -165,7 +166,6 @@ async def nack_message(
     job_id: UUID,
 ) -> None:
     await conn.execute(NACK_MESSAGE, queue_name, job_id)  # type: ignore
-    await conn.execute("SELECT pg_notify('pgjobq.new_job', $1)", queue_name)  # type: ignore
 
 
 EXTEND_ACK_DEADLINES = """\
