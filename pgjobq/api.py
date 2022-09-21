@@ -48,7 +48,7 @@ class JobHandle(Protocol):
         ...
 
 
-class SendCompletionHandle(Protocol):
+class CompletionHandle(Protocol):
     @property
     def jobs(self) -> Mapping[UUID, anyio.Event]:
         """Completion events for each published job"""
@@ -102,7 +102,7 @@ class Queue(ABC):
     @abstractmethod
     def send(
         self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
-    ) -> AsyncContextManager[SendCompletionHandle]:
+    ) -> AsyncContextManager[CompletionHandle]:
         """Put jobs on the queue.
 
         You _must_ enter the context manager but awaiting the completion
@@ -115,6 +115,24 @@ class Queue(ABC):
             AsyncContextManager[JobCompletionHandle]
         """
         pass  # pragma: no cover
+
+    @abstractmethod
+    def wait_for_completion(
+        self,
+        job: UUID,
+        *jobs: UUID,
+        poll_interval: timedelta = timedelta(seconds=10),
+    ) -> AsyncContextManager[CompletionHandle]:
+        """Wait for a job or group of jobs to complete
+
+        Args:
+            job (UUID): job ID as returned by Queue.send()
+            poll_interval (timedelta, optional): interval to poll for completion. Defaults to 10 seconds.
+
+        Returns:
+            AsyncContextManager[CompletionHandle]: A context manager that returns a completion handle.
+        """
+        pass
 
     @abstractmethod
     async def get_statistics(self) -> QueueStatistics:

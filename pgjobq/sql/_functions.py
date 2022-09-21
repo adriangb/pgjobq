@@ -54,7 +54,7 @@ SELECT
     unnest($3::bytea[])
 FROM queue_info
 RETURNING (
-    SELECT 'true'::bool FROM pg_notify('pgjobq.new_job', $1)
+    SELECT 'true'::bool FROM pg_notify('pgjobq.new_job_' || $1, '')
 );  -- NULL if the queue doesn't exist
 """
 
@@ -105,7 +105,7 @@ WITH queue_info AS (
 ), updated_queue_info AS (
     UPDATE pgjobq.queues
     SET
-        undelivered_message_count = undelivered_message_count - (SELECT sum(first_delivery) FROM selected_messages)
+        undelivered_message_count = undelivered_message_count - (SELECT COALESCE(sum(first_delivery), 0) FROM selected_messages)
     WHERE id = (SELECT id FROM queue_info)
 )
 UPDATE pgjobq.messages
@@ -156,7 +156,7 @@ FROM pgjobq.messages
 WHERE pgjobq.messages.id = (SELECT id FROM msg)
 RETURNING (
     SELECT
-        pg_notify('pgjobq.job_completed', $1 || ',' || CAST($2::uuid AS text))
+        pg_notify('pgjobq.job_completed_' || $1, CAST($2::uuid AS text))
 ) AS notified;
 """
 
@@ -175,7 +175,7 @@ UPDATE pgjobq.messages
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
 WHERE queue_id = (SELECT id FROM pgjobq.queues WHERE name = $1) AND id = $2
-RETURNING (SELECT pg_notify('pgjobq.new_job', $1));
+RETURNING (SELECT pg_notify('pgjobq.new_job_' || $1, ''));
 """
 
 
@@ -248,3 +248,11 @@ async def get_statistics(
     if record is None:
         raise QueueDoesNotExist(queue_name=queue_name)
     return record
+
+
+async def get_completed_jobs(
+    conn: PoolOrConnection,
+    queue_name: str,
+    job_ids: List[UUID],
+) -> Sequence[UUID]:
+    ...

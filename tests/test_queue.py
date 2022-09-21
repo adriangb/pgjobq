@@ -282,19 +282,18 @@ async def test_new_message_notification_triggers_poll(
 
     async with anyio.create_task_group() as tg:
 
-        async def worker() -> None:
+        async def worker(*, task_status: TaskStatus) -> None:
             async with queue.receive(poll_interval=60) as job_handle_stream:
-                await job_handle_stream.receive()
-                rcv_times.append(time())
-            return
+                task_status.started()
+                async with (await job_handle_stream.receive()).acquire():
+                    rcv_times.append(time())
 
-        tg.start_soon(worker)
-        # wait for the worker to start polling
-        await anyio.sleep(0.05)
+        await tg.start(worker)
 
-        async with queue.send(b'{"foo":"bar"}'):
+        async with queue.send(b'{"foo":"bar"}') as handle:
             send_times.append(time())
-            pass
+            await handle()
+            print(1)
 
     assert len(send_times) == len(rcv_times)
     # not deterministic
