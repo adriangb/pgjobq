@@ -7,7 +7,7 @@ A job queue built on top of Postgres.
 * Best effort at most once delivery (jobs are only delivered to one worker at a time)
 * Automatic redelivery of failed jobs
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
-* Completion tracking (using `NOTIFY`)
+* Completion tracking (using `NOTIFY`), available from any client as long as you have the job ID.
 * Bulk sending and receiving
 * Fully typed async Python client (using [asyncpg])
 * Persistent scheduled jobs (scheduled in the database, not the client application)
@@ -15,7 +15,6 @@ A job queue built on top of Postgres.
 Possible features:
 
 * Exponential backoffs
-* Wait for any job to complete even if it was sent somewhere else
 
 Unplanned features:
 
