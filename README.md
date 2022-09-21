@@ -15,6 +15,7 @@ A job queue built on top of Postgres.
 Possible features:
 
 * Exponential backoffs
+* Wait for any job to complete even if it was sent somewhere else
 
 Unplanned features:
 
