@@ -79,18 +79,13 @@ class Queue(ABC):
         `poll_interval`.
 
         Args:
-            batch_size (int, optional): maximum number of messages to gether.
+            batch_size (int, optional): maximum number of jobs to gether.
                 Defaults to 1.
             poll_interval (float, optional): interval between polls of the queue.
                 Defaults to 1.
 
         Returns:
-            AsyncIterator[AsyncContextManager[Message]]: An iterator over a batch of messages.
-            Each message is wrapped by a context manager.
-            If you exit with an error the message will be nacked.
-            If you exit without an error it will be acked.
-            As long as you are in the context manager the visibility timeout weill be
-            continually extended.
+            AsyncContextManager[JobHandleStream]: An iterator over jobs.
         """
         pass  # pragma: no cover
 
