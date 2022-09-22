@@ -516,19 +516,19 @@ async def test_send_with_custom_expiration(
     queue: Queue,
     migrated_pool: asyncpg.Pool,
 ) -> None:
-    expiration = datetime.utcnow() + timedelta(seconds=1)
+    expiration = datetime.utcnow() + timedelta(seconds=5)
     async with queue.send(b"", expire_at=expiration):
         pass
 
     # message is available
     async with queue.receive() as message_handle_stream:
-        with anyio.fail_after(0.125):
+        with anyio.fail_after(0.5):
             await message_handle_stream.receive()
 
-    await anyio.sleep(1)
+    await anyio.sleep(5)
 
     # no messages
     async with queue.receive() as message_handle_stream:
-        with anyio.move_on_after(0.125) as scope:
+        with anyio.move_on_after(0.5) as scope:
             await message_handle_stream.receive()
         assert scope.cancel_called is True
