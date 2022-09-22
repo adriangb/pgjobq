@@ -13,7 +13,7 @@ There are plenty of use cases for a persistent queue that do not require infinit
 * Best effort at most once delivery (jobs are only delivered to one worker at a time)
 * Automatic redelivery of failed jobs
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
-* Completion tracking (using `NOTIFY`), available from any client as long as you have the job ID.
+* Low latency completion tracking (using `NOTIFY`)
 * Bulk sending and receiving
 * Fully typed async Python client (using [asyncpg])
 * Persistent scheduled jobs (scheduled in the database, not the client application)
