@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "pgjobq"
-version = "0.5.0"
+name = "pgmq"
+version = "0.1.0"
 description = "PostgreSQL backed job queues"
 authors = ["Adrian Garcia Badaracco <dev@adriangb.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/adriangb/pgjobq"
+homepage = "https://github.com/adriangb/pgmq"
 
 [tool.poetry.dependencies]
 python = ">=3.7,<4"
@@ -33,7 +33,7 @@ profile = "black"
 
 [tool.coverage.run]
 branch = true
-source = ["pgjobq", "tests"]
+source = ["pgmq", "tests"]
 dynamic_context = "test_function"
 
 [tool.coverage.report]
@@ -49,7 +49,7 @@ exclude_lines = [
 testpaths = ["tests"]
 
 [tool.mypy]
-files = "pgjobq/**/*.py,tests/**/*.py"
+files = "pgmq/**/*.py,tests/**/*.py"
 show_error_codes = true
 pretty = true
 warn_unreachable = true

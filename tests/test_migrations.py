@@ -1,7 +1,7 @@
 import asyncpg  # type: ignore
 import pytest
 
-from pgjobq import migrate_to_latest_version
+from pgmq import migrate_to_latest_version
 
 
 @pytest.mark.anyio

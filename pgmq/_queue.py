@@ -24,13 +24,13 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
-from pgjobq.api import CompletionHandle as AbstractCompletionHandle
-from pgjobq.api import JobHandle
-from pgjobq.api import JobHandleStream as AbstractJobHandleStream
-from pgjobq.api import Message
-from pgjobq.api import Queue as AbstractQueue
-from pgjobq.api import QueueStatistics
-from pgjobq.sql._functions import (
+from pgmq.api import CompletionHandle as AbstractCompletionHandle
+from pgmq.api import JobHandle
+from pgmq.api import JobHandleStream as AbstractJobHandleStream
+from pgmq.api import Message
+from pgmq.api import Queue as AbstractQueue
+from pgmq.api import QueueStatistics
+from pgmq.sql._functions import (
     ack_message,
     extend_ack_deadlines,
     get_completed_jobs,
@@ -334,7 +334,7 @@ async def connect_to_queue(
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
             await conn.execute(  # type: ignore
-                "SELECT pgjobq.cleanup_dead_messages()",
+                "SELECT pgmq.cleanup_dead_messages()",
             )
             await anyio.sleep(1)
 
@@ -374,8 +374,8 @@ async def connect_to_queue(
     async with AsyncExitStack() as stack:
         cleanup_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
         ack_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
-        completion_channel = f"pgjobq.job_completed_{queue_name}"
-        new_job_channel = f"pgjobq.new_job_{queue_name}"
+        completion_channel = f"pgmq.job_completed_{queue_name}"
+        new_job_channel = f"pgmq.new_job_{queue_name}"
         await cleanup_conn.add_listener(  # type: ignore
             channel=completion_channel,
             callback=process_completion_notification,

@@ -8,8 +8,8 @@ import asyncpg  # type: ignore
 import pytest
 from anyio.abc import TaskStatus
 
-from pgjobq import Queue, connect_to_queue, create_queue
-from pgjobq.api import JobHandle, QueueStatistics
+from pgmq import Queue, connect_to_queue, create_queue
+from pgmq.api import JobHandle, QueueStatistics
 
 
 @pytest.fixture

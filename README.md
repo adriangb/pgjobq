@@ -1,4 +1,4 @@
-# pgjobq
+# pgmq
 
 A job queue built on top of Postgres.
 
@@ -39,7 +39,7 @@ from contextlib import AsyncExitStack
 
 import anyio
 import asyncpg  # type: ignore
-from pgjobq import create_queue, connect_to_queue, migrate_to_latest_version
+from pgmq import create_queue, connect_to_queue, migrate_to_latest_version
 
 async def main() -> None:
 

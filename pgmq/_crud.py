@@ -24,7 +24,7 @@ async def create_queue(
     if ack_deadline < timedelta(seconds=1):
         raise ValueError("Minimum ack deadline is 1 second")
     return await pool.fetchval(  # type: ignore
-        "SELECT pgjobq.create_queue($1::text, $2, $3, $4)",
+        "SELECT pgmq.create_queue($1::text, $2, $3, $4)",
         queue_name,
         ack_deadline,
         max_delivery_attempts,
@@ -38,7 +38,7 @@ async def delete_queue(
 ) -> bool:
     return (
         await pool.fetchval(  # type: ignore
-            "SELECT pgjobq.delete_queue($1::text)",
+            "SELECT pgmq.delete_queue($1::text)",
             queue_name,
         )
     ) is True

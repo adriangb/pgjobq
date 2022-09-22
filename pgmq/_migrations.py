@@ -22,7 +22,7 @@ async def migrate_to_latest_version(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:  # type: ignore
         try:
             current: Optional[int] = await pool.fetchval(  # type: ignore
-                "SELECT current_revision FROM pgjobq.migrations"
+                "SELECT current_revision FROM pgmq.migrations"
             )
         except asyncpg.exceptions.UndefinedTableError:
             current = 0
@@ -43,7 +43,7 @@ async def migrate_to_latest_version(pool: asyncpg.Pool) -> None:
 
             if applied != current:
                 await conn.execute(  # type: ignore
-                    "UPDATE pgjobq.migrations SET current_revision = $1",
+                    "UPDATE pgmq.migrations SET current_revision = $1",
                     applied,
                 )
                 logger.info(f"Migrations to {applied} from {current} successful")

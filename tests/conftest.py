@@ -6,7 +6,7 @@ import asyncpg  # type: ignore
 import pytest
 from pydantic import BaseSettings
 
-from pgjobq import migrate_to_latest_version
+from pgmq import migrate_to_latest_version
 
 
 class TestPostgresConnectionConfig(BaseSettings):
