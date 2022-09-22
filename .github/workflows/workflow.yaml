@@ -9,7 +9,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-messages:
+jobs:
   lint:
     name: Run Linters
     runs-on: ubuntu-latest
