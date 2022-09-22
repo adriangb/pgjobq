@@ -215,7 +215,6 @@ class Queue(AbstractQueue):
         message: bytes,
         *messages: bytes,
         expire_at: Optional[datetime] = None,
-        max_delivery_attempts: Optional[int] = None,
         schedule_at: Optional[datetime] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
         bodies: List[bytes] = [message, *messages]  # type: ignore
@@ -226,7 +225,6 @@ class Queue(AbstractQueue):
             ids=ids,
             bodies=bodies,
             expire_at=expire_at,
-            max_delivery_attempts=max_delivery_attempts,
             schedule_at=schedule_at,
         )
 

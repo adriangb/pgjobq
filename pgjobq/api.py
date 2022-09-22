@@ -105,7 +105,6 @@ class Queue(ABC):
         __body: bytes,
         *bodies: bytes,
         expire_at: Optional[datetime] = ...,
-        max_delivery_attempts: Optional[int] = ...,
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Put jobs on the queue.

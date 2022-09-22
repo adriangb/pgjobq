@@ -22,7 +22,6 @@ Possible features:
 
 * Exponential backoffs
 * Dead letter queues
-* Overriding expiration, ack intervals or retry attempts on a per message basis
 * Custom delivery ordering key
 * Message attributes and attribute filtering
 * FIFO delivery

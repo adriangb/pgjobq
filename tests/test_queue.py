@@ -532,26 +532,3 @@ async def test_send_with_custom_expiration(
         with anyio.move_on_after(0.125) as scope:
             await job_handle_stream.receive()
         assert scope.cancel_called is True
-
-
-async def test_send_with_custom_delivery_attempts(
-    queue: Queue,
-    migrated_pool: asyncpg.Pool,
-) -> None:
-    async with queue.send(b"", max_delivery_attempts=1):
-        pass
-
-    class Ex(Exception):
-        pass
-
-    # fail
-    with pytest.raises(Ex):
-        async with queue.receive() as job_handle_stream:
-            async with (await job_handle_stream.receive()).acquire():
-                raise Ex
-
-    # no messages
-    async with queue.receive() as job_handle_stream:
-        with anyio.move_on_after(0.125) as scope:
-            await job_handle_stream.receive()
-        assert scope.cancel_called is True

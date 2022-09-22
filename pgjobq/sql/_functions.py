@@ -31,26 +31,23 @@ WITH queue_info AS (
     RETURNING
         id AS queue_id,
         COALESCE($3, now()::timestamp + retention_period) AS expires_at,
-        COALESCE($4, max_delivery_attempts) AS max_delivery_attempts,
-        COALESCE($5, now()::timestamp) AS available_at
+        COALESCE($4, now()::timestamp) AS available_at
 )
 INSERT INTO pgjobq.messages(
     queue_id,
     id,
     expires_at,
-    max_delivery_attempts,
-    delivery_attempts_remaining,
+    delivery_attempts,
     available_at,
     body
 )
 SELECT
     queue_id,
-    unnest($6::uuid[]),
+    unnest($5::uuid[]),
     expires_at,
-    max_delivery_attempts,
-    max_delivery_attempts,
+    0,
     available_at,
-    unnest($7::bytea[])
+    unnest($6::bytea[])
 FROM queue_info
 RETURNING (
     SELECT 'true'::bool FROM pg_notify('pgjobq.new_job_' || $1, '')
@@ -65,7 +62,6 @@ async def publish_messages_from_bytes(
     ids: List[UUID],
     bodies: List[bytes],
     expire_at: Optional[datetime],
-    max_delivery_attempts: Optional[int],
     schedule_at: Optional[datetime],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
@@ -73,7 +69,6 @@ async def publish_messages_from_bytes(
         queue_name,
         len(ids),
         expire_at,
-        max_delivery_attempts,
         schedule_at,
         ids,
         bodies,
@@ -86,16 +81,17 @@ POLL_FOR_MESSAGES = """\
 WITH queue_info AS (
     SELECT
         id,
-        ack_deadline
+        ack_deadline,
+        max_delivery_attempts
     FROM pgjobq.queues
     WHERE name = $1
 ), selected_messages AS (
     SELECT
         id,
-        (SELECT delivery_attempts_remaining = max_delivery_attempts)::int AS first_delivery
+        (SELECT delivery_attempts = 0)::int AS first_delivery
     FROM pgjobq.messages
     WHERE (
-        delivery_attempts_remaining != 0
+        delivery_attempts < (SELECT max_delivery_attempts FROM queue_info)
         AND
         expires_at > now()
         AND
@@ -115,7 +111,7 @@ WITH queue_info AS (
 UPDATE pgjobq.messages
 SET
     available_at = now() + (SELECT ack_deadline FROM queue_info),
-    delivery_attempts_remaining = delivery_attempts_remaining - 1
+    delivery_attempts = delivery_attempts + 1
 FROM selected_messages
 WHERE pgjobq.messages.id = selected_messages.id
 RETURNING pgjobq.messages.id AS id, available_at AS next_ack_deadline, body;
