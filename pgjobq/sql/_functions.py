@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, List, Mapping, Optional, Sequence, Union
 from uuid import UUID
 
@@ -25,13 +25,14 @@ PUBLISH_MESSAGES = """\
 WITH queue_info AS (
     UPDATE pgjobq.queues
     SET
-        current_message_count = current_message_count + array_length($2::uuid[], 1),
-        undelivered_message_count = undelivered_message_count + array_length($2::uuid[], 1)
+        current_message_count = current_message_count + $2,
+        undelivered_message_count = undelivered_message_count + $2
     WHERE name = $1
     RETURNING
         id AS queue_id,
-        retention_period,
-        max_delivery_attempts
+        COALESCE($3, now()::timestamp + retention_period) AS expires_at,
+        COALESCE($4, max_delivery_attempts) AS max_delivery_attempts,
+        COALESCE($5, now()::timestamp) AS available_at
 )
 INSERT INTO pgjobq.messages(
     queue_id,
@@ -44,14 +45,12 @@ INSERT INTO pgjobq.messages(
 )
 SELECT
     queue_id,
-    unnest($2::uuid[]),
-    now() + retention_period,
+    unnest($6::uuid[]),
+    expires_at,
     max_delivery_attempts,
     max_delivery_attempts,
-    -- set next ack to now
-    -- somewhat meaningless but avoids nulls
-    now() + COALESCE($4, '0 seconds'::interval),
-    unnest($3::bytea[])
+    available_at,
+    unnest($7::bytea[])
 FROM queue_info
 RETURNING (
     SELECT 'true'::bool FROM pg_notify('pgjobq.new_job_' || $1, '')
@@ -59,20 +58,25 @@ RETURNING (
 """
 
 
-async def publish_messages(
+async def publish_messages_from_bytes(
     conn: PoolOrConnection,
     *,
     queue_name: str,
-    message_ids: List[UUID],
-    message_bodies: List[bytes],
-    delay: Optional[timedelta],
+    ids: List[UUID],
+    bodies: List[bytes],
+    expire_at: Optional[datetime],
+    max_delivery_attempts: Optional[int],
+    schedule_at: Optional[datetime],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
         PUBLISH_MESSAGES,
         queue_name,
-        message_ids,
-        message_bodies,
-        delay,
+        len(ids),
+        expire_at,
+        max_delivery_attempts,
+        schedule_at,
+        ids,
+        bodies,
     )
     if res is None:
         raise QueueDoesNotExist(queue_name=queue_name)

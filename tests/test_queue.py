@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from time import time
 from typing import AsyncGenerator, List, Set
 from uuid import UUID
@@ -229,22 +229,32 @@ async def test_concurrent_worker_pull_atomic_delivery(
 async def test_enqueue_with_delay(
     queue: Queue,
 ) -> None:
-    async with queue.send(b'{"foo":"bar"}', delay=timedelta(seconds=0.5)):
+    # schedule with zero delay
+    scheduled_at = datetime.utcnow() + timedelta(seconds=0)
+    async with queue.send(b"1", schedule_at=scheduled_at):
         pass
 
     async with queue.receive() as job_handle_stream:
-        with anyio.move_on_after(0.25) as scope:  # no jobs should be available
-            async for _ in job_handle_stream:
-                assert False, "should not be called"
-        assert scope.cancel_called is True
+        # job should be available
+        received = False
+        with anyio.fail_after(0.125):
+            async with (await job_handle_stream.receive()).acquire():
+                received = True
+        assert received
 
-    await anyio.sleep(0.5)  # wait for the job to become available
+    # schedule with a delay
+    scheduled_at = datetime.utcnow() + timedelta(seconds=1)
+    async with queue.send(b"2", schedule_at=scheduled_at):
+        pass
 
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.05):  # we shouldn't have to wait anymore
-            job_handle = await job_handle_stream.receive()
-        async with job_handle.acquire() as job:
-            assert job.body == b'{"foo":"bar"}', job.body
+        # no jobs should be available
+        with anyio.move_on_after(0.25) as scope:
+            await job_handle_stream.receive()
+        assert scope.cancel_called is True
+        await anyio.sleep(0.75)
+        with anyio.fail_after(0.125):
+            await job_handle_stream.receive()
 
 
 @pytest.mark.anyio
@@ -500,3 +510,48 @@ async def test_wait_for_completion_instant_poll(
             # fail fast during tests, this should be near instant
             with anyio.fail_after(1):
                 await handle()
+
+
+async def test_send_with_custom_expiration(
+    queue: Queue,
+    migrated_pool: asyncpg.Pool,
+) -> None:
+    expiration = datetime.utcnow() + timedelta(seconds=1)
+    async with queue.send(b"", expire_at=expiration):
+        pass
+
+    # message is available
+    async with queue.receive() as job_handle_stream:
+        with anyio.fail_after(0.125):
+            await job_handle_stream.receive()
+
+    await anyio.sleep(1)
+
+    # no messages
+    async with queue.receive() as job_handle_stream:
+        with anyio.move_on_after(0.125) as scope:
+            await job_handle_stream.receive()
+        assert scope.cancel_called is True
+
+
+async def test_send_with_custom_delivery_attempts(
+    queue: Queue,
+    migrated_pool: asyncpg.Pool,
+) -> None:
+    async with queue.send(b"", max_delivery_attempts=1):
+        pass
+
+    class Ex(Exception):
+        pass
+
+    # fail
+    with pytest.raises(Ex):
+        async with queue.receive() as job_handle_stream:
+            async with (await job_handle_stream.receive()).acquire():
+                raise Ex
+
+    # no messages
+    async with queue.receive() as job_handle_stream:
+        with anyio.move_on_after(0.125) as scope:
+            await job_handle_stream.receive()
+        assert scope.cancel_called is True

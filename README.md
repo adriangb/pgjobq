@@ -8,7 +8,6 @@ Sometimes you have a Postgres database and need a queue.
 You could stand up more infrastructure (SQS, Redis, etc), or you could use your existing database.
 There are plenty of use cases for a persistent queue that do not require infinite scalability, snapshots or any of the other advanced features full fledged queues/event buses/message brokers have.
 
-
 ## Features
 
 * Best effort at most once delivery (jobs are only delivered to one worker at a time)

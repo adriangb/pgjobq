@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import (
     Any,
     AsyncContextManager,
@@ -101,7 +101,12 @@ class Queue(ABC):
 
     @abstractmethod
     def send(
-        self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
+        self,
+        __body: bytes,
+        *bodies: bytes,
+        expire_at: Optional[datetime] = ...,
+        max_delivery_attempts: Optional[int] = ...,
+        schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Put jobs on the queue.
 

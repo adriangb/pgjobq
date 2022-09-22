@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import (
     Any,
     AsyncContextManager,
@@ -37,7 +37,7 @@ from pgjobq.sql._functions import (
     get_statistics,
     nack_message,
     poll_for_messages,
-    publish_messages,
+    publish_messages_from_bytes,
 )
 
 DATACLASSES_KW: Dict[str, Any] = {}
@@ -211,24 +211,31 @@ class Queue(AbstractQueue):
                 await manager.shutdown(JobState.out_of_scope)
 
     def send(
-        self, body: bytes, *bodies: bytes, delay: Optional[timedelta] = None
+        self,
+        message: bytes,
+        *messages: bytes,
+        expire_at: Optional[datetime] = None,
+        max_delivery_attempts: Optional[int] = None,
+        schedule_at: Optional[datetime] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
+        bodies: List[bytes] = [message, *messages]  # type: ignore
+        ids = [uuid4() for _ in range(len(bodies))]
+        publish = publish_messages_from_bytes(
+            conn=self.pool,
+            queue_name=self.queue_name,
+            ids=ids,
+            bodies=bodies,
+            expire_at=expire_at,
+            max_delivery_attempts=max_delivery_attempts,
+            schedule_at=schedule_at,
+        )
+
         @asynccontextmanager
         async def cm() -> AsyncIterator[AbstractCompletionHandle]:
             # create the job id application side
             # so that we can start listening before we send
-            all_bodies = [body, *bodies]
-            job_ids = [uuid4() for _ in range(len(all_bodies))]
-            async with self.wait_for_completion(*job_ids, poll_interval=None) as handle:
-                conn: asyncpg.Connection
-                async with self.pool.acquire() as conn:  # type: ignore
-                    await publish_messages(
-                        conn,
-                        queue_name=self.queue_name,
-                        message_ids=job_ids,
-                        message_bodies=all_bodies,
-                        delay=delay,
-                    )
+            async with self.wait_for_completion(*ids, poll_interval=None) as handle:
+                await publish
                 yield handle
 
         return cm()

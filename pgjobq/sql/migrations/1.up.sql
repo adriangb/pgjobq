@@ -11,6 +11,7 @@ create table pgjobq.queues (
     id serial primary key,
     name text not null,
     UNIQUE(name),
+    -- default values for inserted messages
     ack_deadline interval not null,
     max_delivery_attempts integer not null,
     retention_period interval not null,
