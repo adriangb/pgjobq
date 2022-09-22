@@ -24,12 +24,7 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
-from pgmq.api import CompletionHandle as AbstractCompletionHandle
-from pgmq.api import Message, MessageHandle
-from pgmq.api import MessageHandleStream as AbstractMessageHandleStream
-from pgmq.api import Queue as AbstractQueue
-from pgmq.api import QueueStatistics
-from pgmq.sql._functions import (
+from pgmq._queries import (
     ack_message,
     extend_ack_deadlines,
     get_completed_messages,
@@ -38,6 +33,11 @@ from pgmq.sql._functions import (
     poll_for_messages,
     publish_messages_from_bytes,
 )
+from pgmq.api import CompletionHandle as AbstractCompletionHandle
+from pgmq.api import Message, MessageHandle
+from pgmq.api import MessageHandleStream as AbstractMessageHandleStream
+from pgmq.api import Queue as AbstractQueue
+from pgmq.api import QueueStatistics
 
 DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover

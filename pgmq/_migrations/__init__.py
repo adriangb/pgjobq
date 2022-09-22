@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_available() -> Iterable[Tuple[int, Path]]:
-    migrations_path = Path(__file__).parent / "sql" / "migrations"
+    migrations_path = Path(__file__).parent
     suffix = ".up.sql"
     for path in migrations_path.glob(f"*{suffix}"):
         version = int(f"{path.name[:-len(suffix)]}")
