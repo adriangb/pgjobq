@@ -25,15 +25,14 @@ import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
 from pgmq.api import CompletionHandle as AbstractCompletionHandle
-from pgmq.api import JobHandle
-from pgmq.api import JobHandleStream as AbstractJobHandleStream
-from pgmq.api import Message
+from pgmq.api import Message, MessageHandle
+from pgmq.api import MessageHandleStream as AbstractMessageHandleStream
 from pgmq.api import Queue as AbstractQueue
 from pgmq.api import QueueStatistics
 from pgmq.sql._functions import (
     ack_message,
     extend_ack_deadlines,
-    get_completed_jobs,
+    get_completed_messages,
     get_statistics,
     nack_message,
     poll_for_messages,
@@ -46,16 +45,16 @@ if sys.version_info >= (3, 10):  # pragma: no cover
 
 
 @dataclass(**DATACLASSES_KW, frozen=True)
-class JobCompletionHandle:
-    jobs: Mapping[UUID, anyio.Event]
+class MessageCompletionHandle:
+    messages: Mapping[UUID, anyio.Event]
 
     async def __call__(self) -> None:
         async with anyio.create_task_group() as tg:
-            for event in self.jobs.values():
+            for event in self.messages.values():
                 tg.start_soon(event.wait)
 
 
-class JobState(enum.Enum):
+class MessageState(enum.Enum):
     created = enum.auto()
     processing = enum.auto()
     succeeded = enum.auto()
@@ -64,47 +63,47 @@ class JobState(enum.Enum):
 
 
 @dataclass(**DATACLASSES_KW, eq=False)
-class JobManager:
+class MessageManager:
     pool: asyncpg.Pool
     message: Message
     queue_name: str
-    pending_jobs: Set[JobManager]
-    state: JobState = JobState.created
+    pending_messages: Set[MessageManager]
+    state: MessageState = MessageState.created
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[Message]:
-        if self.state is JobState.out_of_scope:
+        if self.state is MessageState.out_of_scope:
             raise RuntimeError(
-                "Attempted to acquire a handle to a job is no longer available,"
+                "Attempted to acquire a handle to a message is no longer available,"
                 " possibly because Queue.receive() went out of scope"
             )
-        elif self.state in (JobState.failed, JobState.succeeded):
+        elif self.state in (MessageState.failed, MessageState.succeeded):
             raise RuntimeError(
-                "Attempted to acquire a handle to a job that already completed"
+                "Attempted to acquire a handle to a message that already completed"
             )
-        elif self.state is JobState.processing:
+        elif self.state is MessageState.processing:
             raise RuntimeError(
                 "Attempted to acquire a handle that is already being processed"
             )
-        self.state = JobState.processing
-        state = JobState.succeeded
+        self.state = MessageState.processing
+        state = MessageState.succeeded
         try:
             yield self.message
         except Exception:
             # handle exceptions after entering the message's context manager
-            state = JobState.failed
+            state = MessageState.failed
             raise
         finally:
             await self.shutdown(state)
 
-    async def shutdown(self, final_state: JobState) -> None:
-        self.pending_jobs.discard(self)
-        if self.state not in (JobState.created, JobState.processing):
+    async def shutdown(self, final_state: MessageState) -> None:
+        self.pending_messages.discard(self)
+        if self.state not in (MessageState.created, MessageState.processing):
             return
         conn: asyncpg.Connection
         try:
             async with self.pool.acquire() as conn:  # type: ignore
-                if final_state is JobState.succeeded:
+                if final_state is MessageState.succeeded:
                     await ack_message(
                         conn,
                         self.queue_name,
@@ -121,13 +120,13 @@ class JobManager:
 
 
 @dataclass(**DATACLASSES_KW, eq=False)
-class JobHandleStream:
-    get_nxt: Callable[[], Awaitable[JobHandle]]
+class MessageHandleStream:
+    get_nxt: Callable[[], Awaitable[MessageHandle]]
 
-    def __aiter__(self) -> JobHandleStream:
+    def __aiter__(self) -> MessageHandleStream:
         return self
 
-    def __anext__(self) -> Awaitable[JobHandle]:
+    def __anext__(self) -> Awaitable[MessageHandle]:
         return self.get_nxt()
 
     receive = __anext__
@@ -138,77 +137,77 @@ class Queue(AbstractQueue):
     pool: asyncpg.Pool
     queue_name: str
     completion_callbacks: Dict[UUID, Set[anyio.Event]]
-    new_job_callbacks: Set[Callable[[], None]]
-    in_flight_jobs: Dict[UUID, Set[JobManager]]
+    new_message_callbacks: Set[Callable[[], None]]
+    in_flight_messages: Dict[UUID, Set[MessageManager]]
 
     @asynccontextmanager
     async def receive(
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
-    ) -> AsyncIterator[AbstractJobHandleStream]:
+    ) -> AsyncIterator[AbstractMessageHandleStream]:
 
-        in_flight_jobs: Set[JobManager] = set()
+        in_flight_messages: Set[MessageManager] = set()
         poll_id = uuid4()
-        self.in_flight_jobs[poll_id] = in_flight_jobs
+        self.in_flight_messages[poll_id] = in_flight_messages
 
-        unyielded_jobs: List[JobManager] = []
+        unyielded_messages: List[MessageManager] = []
 
-        async def get_jobs() -> None:
+        async def get_messages() -> None:
             conn: asyncpg.Connection
             async with self.pool.acquire() as conn:  # type: ignore
                 # use a transaction so that if we get cancelled or crash
                 # the messages are still available
                 async with conn.transaction():  # type: ignore
-                    jobs = await poll_for_messages(
+                    messages = await poll_for_messages(
                         conn,
                         queue_name=self.queue_name,
                         batch_size=batch_size,
                     )
                     managers = [
-                        JobManager(
+                        MessageManager(
                             pool=self.pool,
-                            message=Message(id=job["id"], body=job["body"]),
+                            message=Message(id=message["id"], body=message["body"]),
                             queue_name=self.queue_name,
-                            pending_jobs=in_flight_jobs,
+                            pending_messages=in_flight_messages,
                         )
-                        for job in jobs
+                        for message in messages
                     ]
-                    in_flight_jobs.update(managers)
-                    unyielded_jobs.extend(managers)
+                    in_flight_messages.update(managers)
+                    unyielded_messages.extend(managers)
 
-        await get_jobs()
+        await get_messages()
 
-        async def get_next_job() -> JobHandle:
-            while not unyielded_jobs:
-                await get_jobs()
-                if unyielded_jobs:
+        async def get_next_message() -> MessageHandle:
+            while not unyielded_messages:
+                await get_messages()
+                if unyielded_messages:
                     break
 
-                # wait for a new job to be published or the poll interval to expire
-                new_job = anyio.Event()
-                self.new_job_callbacks.add(new_job.set)  # type: ignore
+                # wait for a new message to be published or the poll interval to expire
+                new_message = anyio.Event()
+                self.new_message_callbacks.add(new_message.set)  # type: ignore
 
                 async def skip_forward_if_timeout() -> None:
                     await anyio.sleep(poll_interval)
-                    new_job.set()
+                    new_message.set()
 
                 try:
                     async with anyio.create_task_group() as gather_tg:
                         gather_tg.start_soon(skip_forward_if_timeout)
-                        await new_job.wait()
+                        await new_message.wait()
                         gather_tg.cancel_scope.cancel()
                 finally:
-                    self.new_job_callbacks.discard(new_job.set)  # type: ignore
+                    self.new_message_callbacks.discard(new_message.set)  # type: ignore
 
-            return unyielded_jobs.pop()
+            return unyielded_messages.pop()
 
         try:
-            yield JobHandleStream(get_next_job)
+            yield MessageHandleStream(get_next_message)
         finally:
-            self.in_flight_jobs.pop(poll_id)
-            for manager in in_flight_jobs.copy():
-                await manager.shutdown(JobState.out_of_scope)
+            self.in_flight_messages.pop(poll_id)
+            for manager in in_flight_messages.copy():
+                await manager.shutdown(MessageState.out_of_scope)
 
     def send(
         self,
@@ -230,7 +229,7 @@ class Queue(AbstractQueue):
 
         @asynccontextmanager
         async def cm() -> AsyncIterator[AbstractCompletionHandle]:
-            # create the job id application side
+            # create the message id application side
             # so that we can start listening before we send
             async with self.wait_for_completion(*ids, poll_interval=None) as handle:
                 await publish
@@ -240,23 +239,23 @@ class Queue(AbstractQueue):
 
     def wait_for_completion(
         self,
-        job: UUID,
-        *jobs: UUID,
+        message: UUID,
+        *messages: UUID,
         poll_interval: Optional[timedelta] = timedelta(seconds=10),
     ) -> AsyncContextManager[AbstractCompletionHandle]:
         @asynccontextmanager
         async def cm() -> AsyncIterator[AbstractCompletionHandle]:
-            done_events = {id: anyio.Event() for id in (job, *jobs)}
-            for job_id, event in done_events.items():
-                self.completion_callbacks[job_id].add(event)
+            done_events = {id: anyio.Event() for id in (message, *messages)}
+            for message_id, event in done_events.items():
+                self.completion_callbacks[message_id].add(event)
 
             def cleanup_done_events() -> None:
-                for job_id in done_events.copy().keys():
-                    if done_events[job_id].is_set():
-                        event = done_events.pop(job_id)
-                        self.completion_callbacks[job_id].discard(event)
-                        if not self.completion_callbacks[job_id]:
-                            self.completion_callbacks.pop(job_id)
+                for message_id in done_events.copy().keys():
+                    if done_events[message_id].is_set():
+                        event = done_events.pop(message_id)
+                        self.completion_callbacks[message_id].discard(event)
+                        if not self.completion_callbacks[message_id]:
+                            self.completion_callbacks.pop(message_id)
 
             async def poll_for_completion(interval: float) -> None:
                 nonlocal done_events
@@ -279,13 +278,15 @@ class Queue(AbstractQueue):
 
                     if not new_completion.is_set():
                         # poll
-                        completed_jobs = await get_completed_jobs(
-                            self.pool, self.queue_name, job_ids=list(done_events.keys())
+                        completed_messages = await get_completed_messages(
+                            self.pool,
+                            self.queue_name,
+                            message_ids=list(done_events.keys()),
                         )
-                        if completed_jobs:
+                        if completed_messages:
                             new_completion.set()
-                        for job in completed_jobs:
-                            done_events[job].set()
+                        for message in completed_messages:
+                            done_events[message].set()
                     if new_completion.is_set():
                         cleanup_done_events()
 
@@ -295,7 +296,7 @@ class Queue(AbstractQueue):
                         tg.start_soon(
                             poll_for_completion, poll_interval.total_seconds()
                         )
-                    yield JobCompletionHandle(jobs=done_events.copy())
+                    yield MessageCompletionHandle(messages=done_events.copy())
                     tg.cancel_scope.cancel()
             finally:
                 cleanup_done_events()
@@ -328,8 +329,8 @@ async def connect_to_queue(
         AsyncContextManager[AbstractQueue]: A context manager yielding an AbstractQueue
     """
     completion_callbacks: Dict[UUID, Set[anyio.Event]] = defaultdict(set)
-    new_job_callbacks: Set[Callable[[], None]] = set()
-    checked_out_jobs: Dict[UUID, Set[JobManager]] = {}
+    new_message_callbacks: Set[Callable[[], None]] = set()
+    checked_out_messages: Dict[UUID, Set[MessageManager]] = {}
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
@@ -340,13 +341,15 @@ async def connect_to_queue(
 
     async def extend_acks(conn: asyncpg.Connection) -> None:
         while True:
-            job_ids = [
-                job.message.id for jobs in checked_out_jobs.values() for job in jobs
+            message_ids = [
+                message.message.id
+                for messages in checked_out_messages.values()
+                for message in messages
             ]
             await extend_ack_deadlines(
                 conn,
                 queue_name,
-                job_ids,
+                message_ids,
             )
             await anyio.sleep(0.5)  # less than the min ack deadline
 
@@ -356,26 +359,26 @@ async def connect_to_queue(
         channel: str,
         payload: str,
     ) -> None:
-        job_id = payload
-        job_id_key = UUID(job_id)
-        events = completion_callbacks.get(job_id_key, None) or ()
+        message_id = payload
+        message_id_key = UUID(message_id)
+        events = completion_callbacks.get(message_id_key, None) or ()
         for event in events:
             event.set()
 
-    async def process_new_job_notification(
+    async def process_new_message_notification(
         conn: asyncpg.Connection,
         pid: int,
         channel: str,
         payload: str,
     ) -> None:
-        for cb in new_job_callbacks:
+        for cb in new_message_callbacks:
             cb()
 
     async with AsyncExitStack() as stack:
         cleanup_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
         ack_conn: asyncpg.Connection = await stack.enter_async_context(pool.acquire())  # type: ignore
-        completion_channel = f"pgmq.job_completed_{queue_name}"
-        new_job_channel = f"pgmq.new_job_{queue_name}"
+        completion_channel = f"pgmq.message_completed_{queue_name}"
+        new_message_channel = f"pgmq.new_message_{queue_name}"
         await cleanup_conn.add_listener(  # type: ignore
             channel=completion_channel,
             callback=process_completion_notification,
@@ -386,13 +389,13 @@ async def connect_to_queue(
             callback=process_completion_notification,
         )
         await cleanup_conn.add_listener(  # type: ignore
-            channel=new_job_channel,
-            callback=process_new_job_notification,
+            channel=new_message_channel,
+            callback=process_new_message_notification,
         )
         stack.push_async_callback(
             cleanup_conn.remove_listener,  # type: ignore
-            channel=new_job_channel,
-            callback=process_new_job_notification,
+            channel=new_message_channel,
+            callback=process_new_message_notification,
         )
         async with anyio.create_task_group() as tg:
             tg.start_soon(run_cleanup, cleanup_conn)
@@ -402,8 +405,8 @@ async def connect_to_queue(
                 pool=pool,
                 queue_name=queue_name,
                 completion_callbacks=completion_callbacks,
-                new_job_callbacks=new_job_callbacks,
-                in_flight_jobs=checked_out_jobs,
+                new_message_callbacks=new_message_callbacks,
+                in_flight_messages=checked_out_messages,
             )
             try:
                 yield queue

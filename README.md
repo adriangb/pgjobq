@@ -1,6 +1,6 @@
 # pgmq
 
-A job queue built on top of Postgres.
+A message queue built on top of Postgres.
 
 ## Purpose
 
@@ -10,13 +10,13 @@ There are plenty of use cases for a persistent queue that do not require infinit
 
 ## Features
 
-* Best effort at most once delivery (jobs are only delivered to one worker at a time)
-* Automatic redelivery of failed jobs
+* Best effort at most once delivery (messages are only delivered to one worker at a time)
+* Automatic redelivery of failed messages
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Low latency completion tracking (using `NOTIFY`)
 * Bulk sending and receiving
 * Fully typed async Python client (using [asyncpg])
-* Persistent scheduled jobs (scheduled in the database, not the client application)
+* Persistent scheduled messages (scheduled in the database, not the client application)
 
 Possible features:
 

@@ -43,30 +43,30 @@ class QueueStatistics:
     undelivered_messages: int
 
 
-class JobHandle(Protocol):
+class MessageHandle(Protocol):
     def acquire(self) -> AsyncContextManager[Message]:
         ...
 
 
 class CompletionHandle(Protocol):
     @property
-    def jobs(self) -> Mapping[UUID, anyio.Event]:
-        """Completion events for each published job"""
+    def messages(self) -> Mapping[UUID, anyio.Event]:
+        """Completion events for each published message"""
         ...
 
     async def __call__(self) -> None:
-        """Wait for all jobs to complete"""
+        """Wait for all messages to complete"""
         ...
 
 
-class JobHandleStream(Protocol):
-    def __aiter__(self) -> AsyncIterator[JobHandle]:
+class MessageHandleStream(Protocol):
+    def __aiter__(self) -> AsyncIterator[MessageHandle]:
         ...
 
-    def __anext__(self) -> Awaitable[JobHandle]:
+    def __anext__(self) -> Awaitable[MessageHandle]:
         ...
 
-    def receive(self) -> Awaitable[JobHandle]:
+    def receive(self) -> Awaitable[MessageHandle]:
         ...
 
 
@@ -76,26 +76,26 @@ class Queue(ABC):
         self,
         batch_size: int = 1,
         poll_interval: float = 1,
-    ) -> AsyncContextManager[JobHandleStream]:
-        """Poll for a batch of jobs.
+    ) -> AsyncContextManager[MessageHandleStream]:
+        """Poll for a batch of messages.
 
-        Will wait until at least one and up to `batch_size` jobs are available
+        Will wait until at least one and up to `batch_size` messages are available
         by periodically checking the queue every `poll_interval` seconds.
 
-        When a new job is put on the queue a notification is sent that will cause
+        When a new message is put on the queue a notification is sent that will cause
         immediate polling, thus in practice the latency will be much lower than
         poll interval.
         This mechanism is however not 100% reliable so worst case latency is still
         `poll_interval`.
 
         Args:
-            batch_size (int, optional): maximum number of jobs to gether.
+            batch_size (int, optional): maximum number of messages to gether.
                 Defaults to 1.
             poll_interval (float, optional): interval between polls of the queue.
                 Defaults to 1.
 
         Returns:
-            AsyncContextManager[JobHandleStream]: An iterator over jobs.
+            AsyncContextManager[MessageHandleStream]: An iterator over messages.
         """
         pass  # pragma: no cover
 
@@ -107,30 +107,30 @@ class Queue(ABC):
         expire_at: Optional[datetime] = ...,
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
-        """Put jobs on the queue.
+        """Put messages on the queue.
 
         You _must_ enter the context manager but awaiting the completion
         handle is optional.
 
         Args:
-            body (bytes): arbitrary bytes, the body of the job.
+            body (bytes): arbitrary bytes, the body of the message.
 
         Returns:
-            AsyncContextManager[JobCompletionHandle]
+            AsyncContextManager[MessageCompletionHandle]
         """
         pass  # pragma: no cover
 
     @abstractmethod
     def wait_for_completion(
         self,
-        job: UUID,
-        *jobs: UUID,
+        message: UUID,
+        *messages: UUID,
         poll_interval: timedelta = timedelta(seconds=10),
     ) -> AsyncContextManager[CompletionHandle]:
-        """Wait for a job or group of jobs to complete
+        """Wait for a message or group of messages to complete
 
         Args:
-            job (UUID): job ID as returned by Queue.send()
+            message (UUID): message ID as returned by Queue.send()
             poll_interval (timedelta, optional): interval to poll for completion. Defaults to 10 seconds.
 
         Returns:

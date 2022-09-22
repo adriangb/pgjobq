@@ -50,7 +50,7 @@ SELECT
     unnest($6::bytea[])
 FROM queue_info
 RETURNING (
-    SELECT 'true'::bool FROM pg_notify('pgmq.new_job_' || $1, '')
+    SELECT 'true'::bool FROM pg_notify('pgmq.new_message_' || $1, '')
 );  -- NULL if the queue doesn't exist
 """
 
@@ -118,7 +118,7 @@ RETURNING pgmq.messages.id AS id, available_at AS next_ack_deadline, body;
 """
 
 
-class JobRecord(TypedDict):
+class MessageRecord(TypedDict):
     id: UUID
     body: bytes
     next_ack_deadline: datetime
@@ -129,7 +129,7 @@ async def poll_for_messages(
     *,
     queue_name: str,
     batch_size: int,
-) -> Sequence[JobRecord]:
+) -> Sequence[MessageRecord]:
     return await conn.fetch(  # type: ignore
         POLL_FOR_MESSAGES,
         queue_name,
@@ -156,7 +156,7 @@ FROM pgmq.messages
 WHERE pgmq.messages.id = (SELECT id FROM msg)
 RETURNING (
     SELECT
-        pg_notify('pgmq.job_completed_' || $1, CAST($2::uuid AS text))
+        pg_notify('pgmq.message_completed_' || $1, CAST($2::uuid AS text))
 ) AS notified;
 """
 
@@ -164,9 +164,9 @@ RETURNING (
 async def ack_message(
     conn: PoolOrConnection,
     queue_name: str,
-    job_id: UUID,
+    message_id: UUID,
 ) -> None:
-    await conn.execute(ACK_MESSAGE, queue_name, job_id)  # type: ignore
+    await conn.execute(ACK_MESSAGE, queue_name, message_id)  # type: ignore
 
 
 NACK_MESSAGE = """\
@@ -175,16 +175,16 @@ UPDATE pgmq.messages
 -- which check to make sure the message is still available before extending
 SET available_at = now() - '1 second'::interval
 WHERE queue_id = (SELECT id FROM pgmq.queues WHERE name = $1) AND id = $2
-RETURNING (SELECT pg_notify('pgmq.new_job_' || $1, ''));
+RETURNING (SELECT pg_notify('pgmq.new_message_' || $1, ''));
 """
 
 
 async def nack_message(
     conn: PoolOrConnection,
     queue_name: str,
-    job_id: UUID,
+    message_id: UUID,
 ) -> None:
-    await conn.execute(NACK_MESSAGE, queue_name, job_id)  # type: ignore
+    await conn.execute(NACK_MESSAGE, queue_name, message_id)  # type: ignore
 
 
 EXTEND_ACK_DEADLINES = """\
@@ -207,7 +207,7 @@ WHERE (
     AND
     id = any($2::uuid[])
     AND
-    -- skip any jobs that already expired
+    -- skip any messages that already expired
     -- this avoids race conditions between
     -- extending acks and nacking
     available_at > now()
@@ -219,9 +219,9 @@ RETURNING available_at AS next_ack_deadline;
 async def extend_ack_deadlines(
     conn: PoolOrConnection,
     queue_name: str,
-    job_ids: Sequence[UUID],
+    message_ids: Sequence[UUID],
 ) -> Optional[datetime]:
-    return await conn.fetchval(EXTEND_ACK_DEADLINES, queue_name, list(job_ids))  # type: ignore
+    return await conn.fetchval(EXTEND_ACK_DEADLINES, queue_name, list(message_ids))  # type: ignore
 
 
 GET_STATISTICS = """\
@@ -276,10 +276,10 @@ WHERE NOT EXISTS(
 """
 
 
-async def get_completed_jobs(
+async def get_completed_messages(
     conn: PoolOrConnection,
     queue_name: str,
-    job_ids: List[UUID],
+    message_ids: List[UUID],
 ) -> Sequence[UUID]:
-    records: List[Record] = await conn.fetch(GET_COMPLETED_JOBS, queue_name, job_ids)  # type: ignore
+    records: List[Record] = await conn.fetch(GET_COMPLETED_JOBS, queue_name, message_ids)  # type: ignore
     return [record["id"] for record in records]

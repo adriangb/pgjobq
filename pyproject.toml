@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "pgmq"
 version = "0.1.0"
-description = "PostgreSQL backed job queues"
+description = "PostgreSQL backed message queues"
 authors = ["Adrian Garcia Badaracco <dev@adriangb.com>"]
 license = "MIT"
 readme = "README.md"
