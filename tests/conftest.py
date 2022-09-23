@@ -51,24 +51,29 @@ async def admin_db_conn(
         await conn.close()  # type: ignore
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
+def test_db_name() -> str:
+    return "".join(choices(ascii_lowercase, k=5))
+
+
+@pytest.fixture(scope="session")
 async def pool(
     admin_db_conn: asyncpg.Connection,
+    test_db_name: str,
 ) -> AsyncGenerator[asyncpg.Pool, None]:
-    db_name = "".join(choices(ascii_lowercase, k=5))
-    await admin_db_conn.execute(f"CREATE DATABASE {db_name}")  # type: ignore
+    await admin_db_conn.execute(f"CREATE DATABASE {test_db_name}")  # type: ignore
     try:
         async with asyncpg.create_pool(  # type: ignore
             host=connection_config.host,
             port=connection_config.port,
             user=connection_config.user,
             password=connection_config.password,
-            database=db_name,
+            database=test_db_name,
         ) as pool:
             await migrate_to_latest_version(pool)
             yield pool
     finally:
-        await admin_db_conn.execute(f"DROP DATABASE {db_name}")  # type: ignore
+        await admin_db_conn.execute(f"DROP DATABASE {test_db_name}")  # type: ignore
 
 
 @pytest.fixture
@@ -76,4 +81,7 @@ async def migrated_pool(
     pool: asyncpg.Pool,
 ) -> asyncpg.Pool:
     await migrate_to_latest_version(pool)
-    return pool
+    try:
+        yield pool
+    finally:
+        await pool.execute("DROP SCHEMA IF EXISTS pgmq CASCADE")

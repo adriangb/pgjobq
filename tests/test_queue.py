@@ -293,24 +293,22 @@ async def test_new_message_notification_triggers_poll(
 
     async with anyio.create_task_group() as tg:
 
-        async def worker(*, task_status: TaskStatus) -> None:
-            async with queue.receive(poll_interval=60) as message_handle_stream:
-                task_status.started()
-                async with (await message_handle_stream.receive()).acquire():
-                    rcv_times.append(time())
+        async def producer() -> None:
+            async with queue.send(b'{"foo":"bar"}') as handle:
+                send_times.append(time())
+                await handle()
 
-        await tg.start(worker)
-
-        async with queue.send(b'{"foo":"bar"}') as handle:
-            send_times.append(time())
-            await handle()
-            print(1)
+        async with queue.receive(poll_interval=60) as message_handle_stream:
+            tg.start_soon(producer)
+            await anyio.sleep(1)
+            async with (await message_handle_stream.receive()).acquire():
+                rcv_times.append(time())
 
     assert len(send_times) == len(rcv_times)
     # not deterministic
     # but generally we are checking that elapsed time
     # between a send and rcv << poll_interval
-    assert rcv_times[0] - send_times[0] < 0.1
+    assert rcv_times[0] - send_times[0] < 1
 
 
 @pytest.mark.anyio
