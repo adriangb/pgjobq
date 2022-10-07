@@ -259,6 +259,7 @@ class Queue(AbstractQueue):
 
             async def poll_for_completion(interval: float) -> None:
                 nonlocal done_events
+                remaining = len(done_events)
                 while True:
                     new_completion = anyio.Event()
                     # wait for a completion notification or poll interval to expire
@@ -285,10 +286,13 @@ class Queue(AbstractQueue):
                         )
                         if completed_messages:
                             new_completion.set()
+                        remaining -= len(completed_messages)
                         for message in completed_messages:
                             done_events[message].set()
                     if new_completion.is_set():
                         cleanup_done_events()
+                    if remaining == 0:
+                        return
 
             try:
                 async with anyio.create_task_group() as tg:
