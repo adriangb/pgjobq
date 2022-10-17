@@ -23,6 +23,7 @@ Possible features:
 * Exponential backoffs
 * Dead letter queues
 * Custom delivery ordering key
+* Responses / completion messages
 * Message attributes and attribute filtering
 * FIFO delivery
 * Backpressure / bound queues

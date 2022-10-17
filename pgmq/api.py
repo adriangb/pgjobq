@@ -54,7 +54,7 @@ class CompletionHandle(Protocol):
         """Completion events for each published message"""
         ...
 
-    async def __call__(self) -> None:
+    async def wait(self) -> None:
         """Wait for all messages to complete"""
         ...
 
@@ -135,6 +135,19 @@ class Queue(ABC):
 
         Returns:
             AsyncContextManager[CompletionHandle]: A context manager that returns a completion handle.
+        """
+        pass  # pragma: no cover
+
+    @abstractmethod
+    def cancel(
+        self,
+        message: UUID,
+        *messages: UUID,
+    ) -> Awaitable[None]:
+        """Cancel in-flight messages
+
+        Args:
+            message (UUID): message ID as returned by Queue.send()
         """
         pass  # pragma: no cover
 

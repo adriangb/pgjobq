@@ -48,10 +48,11 @@ if sys.version_info >= (3, 10):  # pragma: no cover
 class MessageCompletionHandle:
     messages: Mapping[UUID, anyio.Event]
 
-    async def __call__(self) -> None:
+    async def wait(self) -> None:
         async with anyio.create_task_group() as tg:
             for event in self.messages.values():
                 tg.start_soon(event.wait)
+        return None
 
 
 class MessageState(enum.Enum):
@@ -68,6 +69,7 @@ class MessageManager:
     message: Message
     queue_name: str
     pending_messages: Set[MessageManager]
+    queue: Queue
     state: MessageState = MessageState.created
 
     @asynccontextmanager
@@ -87,8 +89,17 @@ class MessageManager:
             )
         self.state = MessageState.processing
         state = MessageState.succeeded
+
+        async def listen_for_cancellation(tg: TaskGroup) -> None:
+            async with self.queue.wait_for_completion(self.message.id) as handle:
+                await handle.wait()
+                tg.cancel_scope.cancel()
+
         try:
-            yield self.message
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(listen_for_cancellation, tg)
+                yield self.message
+                tg.cancel_scope.cancel()
         except Exception:
             # handle exceptions after entering the message's context manager
             state = MessageState.failed
@@ -170,6 +181,7 @@ class Queue(AbstractQueue):
                             message=Message(id=message["id"], body=message["body"]),
                             queue_name=self.queue_name,
                             pending_messages=in_flight_messages,
+                            queue=self,
                         )
                         for message in messages
                     ]
@@ -236,6 +248,11 @@ class Queue(AbstractQueue):
                 yield handle
 
         return cm()
+
+    async def cancel(self, message: UUID, *messages: UUID) -> None:
+        conn: asyncpg.Connection
+        async with self.pool.acquire() as conn:  # type: ignore
+            await ack_message(conn, self.queue_name, message, *messages)
 
     def wait_for_completion(
         self,

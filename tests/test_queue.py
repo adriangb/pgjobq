@@ -218,7 +218,7 @@ async def test_concurrent_worker_pull_atomic_delivery(
 
         async with connect_to_queue("test-queue", migrated_pool) as queue:
             async with queue.send(b"{}") as completion_handle:
-                await completion_handle()
+                await completion_handle.wait()
         tg.cancel_scope.cancel()
 
     # we check that the message was only received and processed once
@@ -275,7 +275,7 @@ async def test_completion_handle_awaited(
 
         async with queue.send(b'{"foo":"bar"}') as completion_handle:
             events.append("sent")
-            await completion_handle()
+            await completion_handle.wait()
             events.append("completed")
 
     assert events in (
@@ -296,7 +296,7 @@ async def test_new_message_notification_triggers_poll(
         async def producer() -> None:
             async with queue.send(b'{"foo":"bar"}') as handle:
                 send_times.append(time())
-                await handle()
+                await handle.wait()
 
         async with queue.receive(poll_interval=60) as message_handle_stream:
             tg.start_soon(producer)
@@ -341,7 +341,7 @@ async def test_batched_send(queue: Queue) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(worker)
         async with queue.send(b"1", b"2") as completion_handle:
-            await completion_handle()
+            await completion_handle.wait()
             events.append("completed")
 
     assert events == ["processed", "processed", "completed"]
@@ -472,7 +472,7 @@ async def test_get_completed_messages_in_flight(
         ) as handle:
             with anyio.fail_after(5):  # fail fast during tests
                 async with anyio.create_task_group() as tg:
-                    tg.start_soon(handle)
+                    tg.start_soon(handle.wait)
                     # process the other message
                     async with queue.receive() as message_handle_stream:
                         async with (await message_handle_stream.receive()).acquire():
@@ -507,7 +507,7 @@ async def test_wait_for_completion_instant_poll(
         ) as handle:
             # fail fast during tests, this should be near instant
             with anyio.fail_after(1):
-                await handle()
+                await handle.wait()
 
 
 async def test_send_with_custom_expiration(
@@ -530,3 +530,26 @@ async def test_send_with_custom_expiration(
         with anyio.move_on_after(0.5) as scope:
             await message_handle_stream.receive()
         assert scope.cancel_called is True
+
+
+@pytest.mark.anyio
+async def test_cancellation(
+    queue: Queue,
+) -> None:
+
+    acquired = anyio.Event()
+
+    async def worker() -> None:
+        async with queue.receive() as message_handle_stream:
+            async for message_handle in message_handle_stream:
+                async with message_handle.acquire() as _:
+                    acquired.set()
+                    await anyio.sleep(float("inf"))
+                return
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(worker)
+        async with queue.send(b'{"foo":"bar"}') as handle:
+            await acquired.wait()
+            await queue.cancel(*handle.messages.keys())
+            await handle.wait()
