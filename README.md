@@ -2,6 +2,11 @@
 
 A message queue built on top of Postgres.
 
+## Project status
+
+Please do not use this for anything other than experimentation or inspiration.
+At some point I may decide to support this long term (at which point this warning will be removed), but until then this is just a playground subject to breaking changes (including breaking schema changes).
+
 ## Purpose
 
 Sometimes you have a Postgres database and need a queue.
