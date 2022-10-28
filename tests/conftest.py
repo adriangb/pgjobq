@@ -57,7 +57,7 @@ def test_db_name() -> str:
     return "".join(choices(ascii_lowercase, k=5))
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def pool(
     admin_db_conn: asyncpg.Connection,
     test_db_name: str,
