@@ -23,11 +23,14 @@ class QueueOptions:
             raise ValueError("Minimum delivery attempts is 1")
 
 
+DEFAULT_QUEUE_OPTIONS = QueueOptions()
+
+
 CREATE = """\
 INSERT INTO pgmq.queues(name, ack_deadline, max_delivery_attempts, retention_period)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
-RETURNING 1;
+RETURNING id;
 """
 
 
@@ -36,16 +39,14 @@ async def _create(
     conn: asyncpg.Connection,
     options: QueueOptions,
 ) -> bool:
-    return (
-        await conn.fetchval(  # type: ignore
-            CREATE,
-            queue_name,
-            options.ack_deadline,
-            options.max_delivery_attempts,
-            options.retention_period,
-        )
-        is not None
+    res = await conn.fetchval(  # type: ignore
+        CREATE,
+        queue_name,
+        options.ack_deadline,
+        options.max_delivery_attempts,
+        options.retention_period,
     )
+    return res is not None
 
 
 LINK = """\
@@ -63,10 +64,11 @@ WITH parent AS (
     WHERE name = $3
 )
 INSERT INTO pgmq.queue_links(parent_id, child_id, link_type_id)
-SELECT parent.id, child.id, relationship_type.id
+SELECT
+    (SELECT id FROM parent),
+    (SELECT id FROM child),
+    (SELECT id FROM relationship_type)
 FROM parent
-LEFT JOIN child ON 1 = 1
-LEFT JOIN relationship_type ON 1 = 1
 ON CONFLICT DO NOTHING
 """
 
@@ -75,7 +77,7 @@ async def _link(
     conn: asyncpg.Connection,
     parent_queue_name: str,
     child_queue_name: str,
-    link_type: Literal["dlq", "completed"],
+    link_type: Literal["dlq"],
 ) -> None:
     await conn.fetchval(  # type: ignore
         LINK,
@@ -89,11 +91,10 @@ async def create_queue(
     queue_name: str,
     pool: asyncpg.Pool,
     *,
-    ack_deadline: timedelta = timedelta(seconds=10),
-    max_delivery_attempts: int = 10,
-    retention_period: timedelta = timedelta(days=7),
+    ack_deadline: timedelta = DEFAULT_QUEUE_OPTIONS.ack_deadline,
+    max_delivery_attempts: int = DEFAULT_QUEUE_OPTIONS.max_delivery_attempts,
+    retention_period: timedelta = DEFAULT_QUEUE_OPTIONS.retention_period,
     dlq_options: Optional[QueueOptions] = QueueOptions(),
-    completion_queue_options: Optional[QueueOptions] = None,
 ) -> bool:
     if not QUEUE_NAME_REGEX.match(queue_name):
         raise ValueError(
@@ -126,19 +127,6 @@ async def create_queue(
                     child_queue_name=dlq_name,
                     link_type="dlq",
                 )
-            if completion_queue_options is not None:
-                completion_queue_name = f"{queue_name}_completed"
-                await _create(
-                    completion_queue_name,
-                    conn,
-                    completion_queue_options,
-                )
-                await _link(
-                    conn,
-                    parent_queue_name=queue_name,
-                    child_queue_name=completion_queue_name,
-                    link_type="completed",
-                )
         return created
 
 
@@ -154,9 +142,8 @@ async def delete_queue(
     queue_name: str,
     pool: asyncpg.Pool,
 ) -> bool:
-    return (
-        await pool.fetchval(  # type: ignore
-            DELETE,
-            queue_name,
-        )
-    ) is not None
+    res = await pool.fetchval(  # type: ignore
+        DELETE,
+        queue_name,
+    )
+    return res is not None

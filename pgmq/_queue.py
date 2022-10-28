@@ -26,6 +26,7 @@ from anyio.abc import TaskGroup
 
 from pgmq._queries import (
     ack_message,
+    cleanup_dead_messages,
     extend_ack_deadlines,
     get_completed_messages,
     get_statistics,
@@ -225,7 +226,6 @@ class Queue(AbstractQueue):
         self,
         message: bytes,
         *messages: bytes,
-        expire_at: Optional[datetime] = None,
         schedule_at: Optional[datetime] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
         bodies: List[bytes] = [message, *messages]  # type: ignore
@@ -235,7 +235,6 @@ class Queue(AbstractQueue):
             queue_name=self.queue_name,
             ids=ids,
             bodies=bodies,
-            expire_at=expire_at,
             schedule_at=schedule_at,
         )
 
@@ -327,8 +326,7 @@ class Queue(AbstractQueue):
     async def get_statistics(self) -> QueueStatistics:
         record = await get_statistics(self.pool, self.queue_name)
         return QueueStatistics(
-            total_messages_in_queue=record["current_message_count"],
-            undelivered_messages=record["undelivered_message_count"],
+            messages=record["messages"],
         )
 
 
@@ -355,9 +353,7 @@ async def connect_to_queue(
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
-            await conn.execute(  # type: ignore
-                "SELECT pgmq.cleanup_dead_messages()",
-            )
+            await cleanup_dead_messages(conn)
             await anyio.sleep(1)
 
     async def extend_acks(conn: asyncpg.Connection) -> None:
@@ -374,7 +370,7 @@ async def connect_to_queue(
             )
             await anyio.sleep(0.5)  # less than the min ack deadline
 
-    async def process_completion_notification(
+    def process_completion_notification(
         conn: asyncpg.Connection,
         pid: int,
         channel: str,
@@ -386,7 +382,7 @@ async def connect_to_queue(
         for event in events:
             event.set()
 
-    async def process_new_message_notification(
+    def process_new_message_notification(
         conn: asyncpg.Connection,
         pid: int,
         channel: str,
@@ -419,7 +415,7 @@ async def connect_to_queue(
             callback=process_new_message_notification,
         )
         async with anyio.create_task_group() as tg:
-            tg.start_soon(run_cleanup, cleanup_conn)
+            # tg.start_soon(run_cleanup, cleanup_conn)
             tg.start_soon(extend_acks, ack_conn)
 
             queue = Queue(

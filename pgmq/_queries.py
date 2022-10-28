@@ -23,35 +23,30 @@ class QueueDoesNotExist(LookupError):
 
 PUBLISH_MESSAGES = """\
 WITH queue_info AS (
-    UPDATE pgmq.queues
-    SET
-        current_message_count = current_message_count + $2,
-        undelivered_message_count = undelivered_message_count + $2
-    WHERE name = $1
-    RETURNING
+    SELECT
         id AS queue_id,
-        COALESCE($3, now()::timestamp + retention_period) AS expires_at,
-        COALESCE($4, now()::timestamp) AS available_at
+        max_delivery_attempts,
+        retention_period
+    FROM pgmq.queues
+    WHERE name = $1
 )
 INSERT INTO pgmq.messages(
     queue_id,
     id,
     expires_at,
-    delivery_attempts,
+    delivery_attempts_remaining,
     available_at,
     body
 )
 SELECT
     queue_id,
-    unnest($5::uuid[]),
-    expires_at,
-    0,
-    available_at,
-    unnest($6::bytea[])
+    unnest($3::uuid[]),
+    COALESCE($2, now()::timestamp) + retention_period,
+    max_delivery_attempts,
+    COALESCE($2, now()::timestamp),
+    unnest($4::bytea[])
 FROM queue_info
-RETURNING (
-    SELECT 'true'::bool FROM pg_notify('pgmq.new_message_' || $1, '')
-);  -- NULL if the queue doesn't exist
+RETURNING queue_id;
 """
 
 
@@ -61,14 +56,11 @@ async def publish_messages_from_bytes(
     queue_name: str,
     ids: List[UUID],
     bodies: List[bytes],
-    expire_at: Optional[datetime],
     schedule_at: Optional[datetime],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
         PUBLISH_MESSAGES,
         queue_name,
-        len(ids),
-        expire_at,
         schedule_at,
         ids,
         bodies,
@@ -88,10 +80,10 @@ WITH queue_info AS (
 ), selected_messages AS (
     SELECT
         id,
-        (SELECT delivery_attempts = 0)::int AS first_delivery
+        delivery_attempts_remaining
     FROM pgmq.messages
     WHERE (
-        delivery_attempts < (SELECT max_delivery_attempts FROM queue_info)
+        delivery_attempts_remaining != 0
         AND
         expires_at > now()
         AND
@@ -102,19 +94,14 @@ WITH queue_info AS (
     ORDER BY id
     FOR UPDATE SKIP LOCKED
     LIMIT $2
-), updated_queue_info AS (
-    UPDATE pgmq.queues
-    SET
-        undelivered_message_count = undelivered_message_count - (SELECT COALESCE(sum(first_delivery), 0) FROM selected_messages)
-    WHERE id = (SELECT id FROM queue_info)
 )
 UPDATE pgmq.messages
 SET
     available_at = now() + (SELECT ack_deadline FROM queue_info),
-    delivery_attempts = delivery_attempts + 1
+    delivery_attempts_remaining = selected_messages.delivery_attempts_remaining - 1
 FROM selected_messages
 WHERE pgmq.messages.id = selected_messages.id
-RETURNING pgmq.messages.id AS id, available_at AS next_ack_deadline, body;
+RETURNING pgmq.messages.id, available_at AS next_ack_deadline, body
 """
 
 
@@ -139,25 +126,14 @@ async def poll_for_messages(
 
 ACK_MESSAGE = """\
 WITH queue_info AS (
-    UPDATE pgmq.queues
-    SET
-        current_message_count = current_message_count - 1
-    WHERE name = $1
-    RETURNING
-        id
-), msg AS (
     SELECT
         id
-    FROM pgmq.messages
-    WHERE queue_id = (SELECT id FROM queue_info) AND id = $2::uuid
+    FROM pgmq.queues
+    WHERE name = $1
 )
 DELETE
 FROM pgmq.messages
-WHERE pgmq.messages.id = (SELECT id FROM msg)
-RETURNING (
-    SELECT
-        pg_notify('pgmq.message_completed_' || $1, CAST($2::uuid AS text))
-) AS notified;
+WHERE pgmq.messages.id = $2
 """
 
 
@@ -170,12 +146,147 @@ async def ack_message(
 
 
 NACK_MESSAGE = """\
-UPDATE pgmq.messages
--- make it available in the past to avoid race conditions with extending acks
--- which check to make sure the message is still available before extending
-SET available_at = now() - '1 second'::interval
-WHERE queue_id = (SELECT id FROM pgmq.queues WHERE name = $1) AND id = $2
-RETURNING (SELECT pg_notify('pgmq.new_message_' || $1, ''));
+WITH queue_info AS (
+    SELECT
+        id,
+        max_delivery_attempts,
+        retention_period
+    FROM pgmq.queues
+    WHERE name = $1
+), updated_messages AS (
+    UPDATE pgmq.messages
+    -- make it available in the past to avoid race conditions with extending deadlines
+    -- which check to make sure the message is still available before extending
+    SET
+        available_at = now() - '1 second'::interval
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = $2
+        AND
+        delivery_attempts_remaining != 0
+    )
+), deleted_messages AS (
+    DELETE FROM pgmq.messages
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = $2
+        AND
+        delivery_attempts_remaining == 0
+    )
+    RETURNING id, queue_id, body
+), dlq_messages AS (
+    SELECT
+        deleted_messages.id AS id,
+        deleted_messages.body AS body,
+        now()::timestamp + dlq.retention_period pgmq.queues.retention_period AS expires_at,
+        dlq.max_delivery_attempts AS max_delivery_attempts
+    FROM deleted_messages d
+    LEFT JOIN pgmq.queues ON d.queue_id = pgmq.queues.id
+    LEFT JOIN LATERAL (
+        SELECT
+            pgmq.queue_links.child_id AS queue_id,
+            pgmq.queues.retention_period AS retention_period,
+            pgmq.queues.max_delivery_attempts AS max_delivery_attempts
+        FROM pgmq.queue_links
+        WHERE (
+            parent_id = d.queue_id
+            AND
+            link_type_id = (SELECT id FROM pgmq.queue_link_types WHERE name = 'dlq')
+        )
+        LEFT JOIN pgmq.queues ON pgmq.queue_links.child_id = pgmq.queues.id
+    ) dlq ON dlq.dlq_queue_id = deleted_messages.queue_id
+)
+INSERT INTO pgmq.messages(
+    queue_id,
+    id,
+    expires_at,
+    delivery_attempts_remaining,
+    available_at,
+    body
+)
+SELECT
+    queue_id,
+    id,
+   expires_at
+    max_delivery_attempts,
+    delivery_attempts_remaining,
+    body
+FROM dlq_messages;
+"""
+
+
+NACK_MESSAGE = """\
+WITH queue_info AS (
+    SELECT
+        id,
+        max_delivery_attempts,
+        retention_period
+    FROM pgmq.queues
+    WHERE name = $1
+), updated_messages AS (
+    UPDATE pgmq.messages
+    -- make it available in the past to avoid race conditions with extending deadlines
+    -- which check to make sure the message is still available before extending
+    SET
+        available_at = now() - '1 second'::interval
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = $2
+        AND
+        delivery_attempts_remaining != 0
+    )
+), deleted_messages AS (
+    DELETE FROM pgmq.messages
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = $2
+        AND
+        delivery_attempts_remaining = 0
+    )
+    RETURNING id, queue_id, body
+), dlq_messages AS (
+    SELECT
+        d.id AS id,
+        d.body AS body,
+        dlq.queue_id,
+        now()::timestamp + dlq.retention_period AS expires_at,
+        dlq.max_delivery_attempts AS max_delivery_attempts
+    FROM deleted_messages d
+    JOIN LATERAL (
+        SELECT
+            pgmq.queue_links.child_id AS queue_id,
+            pgmq.queues.retention_period AS retention_period,
+            pgmq.queues.max_delivery_attempts AS max_delivery_attempts
+        FROM pgmq.queue_links
+        LEFT JOIN pgmq.queues ON (
+            parent_id = d.queue_id
+            AND
+            link_type_id = (SELECT id FROM pgmq.queue_link_types WHERE name = 'dlq')
+            AND
+            pgmq.queue_links.child_id = pgmq.queues.id
+        )
+    ) dlq ON true
+)
+INSERT INTO pgmq.messages(
+    queue_id,
+    id,
+    expires_at,
+    delivery_attempts_remaining,
+    available_at,
+    body
+)
+SELECT
+    queue_id,
+    id,
+    expires_at,
+    max_delivery_attempts,
+    now()::timestamp,
+    body
+FROM dlq_messages;
 """
 
 
@@ -209,7 +320,7 @@ WHERE (
     AND
     -- skip any messages that already expired
     -- this avoids race conditions between
-    -- extending acks and nacking
+    -- extending deadlines and nacking
     available_at > now()
 )
 RETURNING available_at AS next_ack_deadline;
@@ -225,17 +336,20 @@ async def extend_ack_deadlines(
 
 
 GET_STATISTICS = """\
-SELECT
-    current_message_count,
-    undelivered_message_count
-FROM pgmq.queues
-WHERE name = $1
+WITH queue_info AS (
+    SELECT
+        id
+    FROM pgmq.queues
+    WHERE name = $1
+)
+SELECT count(*) AS messages
+FROM pgmq.messages
+WHERE queue_id = (SELECT id FROM queue_info)
 """
 
 
 class QueueStatisticsRecord(TypedDict):
-    current_message_count: int
-    undelivered_message_count: int
+    messages: int
 
 
 async def get_statistics(
@@ -283,3 +397,21 @@ async def get_completed_messages(
 ) -> Sequence[UUID]:
     records: List[Record] = await conn.fetch(GET_COMPLETED_JOBS, queue_name, message_ids)  # type: ignore
     return [record["id"] for record in records]
+
+
+CLEANUP_DEAD_MESSAGES = """\
+DELETE
+FROM pgmq.messages
+USING pgmq.queues
+WHERE (
+    available_at < now()
+    AND
+    expires_at < now()
+);
+"""
+
+
+async def cleanup_dead_messages(
+    conn: PoolOrConnection,
+) -> None:
+    await conn.execute(CLEANUP_DEAD_MESSAGES)  # type: ignore

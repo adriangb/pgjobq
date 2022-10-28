@@ -404,7 +404,7 @@ async def test_queue_statistics(
 ) -> None:
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(total_messages_in_queue=0, undelivered_messages=0)
+    expected = QueueStatistics(messages=0)
     assert stats == expected
 
     async with queue.send(b"{}"):
@@ -413,14 +413,7 @@ async def test_queue_statistics(
         pass
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(total_messages_in_queue=2, undelivered_messages=2)
-    assert stats == expected
-
-    async with queue.receive() as message_handle_stream:
-        await message_handle_stream.receive()
-
-    stats = await queue.get_statistics()
-    expected = QueueStatistics(total_messages_in_queue=2, undelivered_messages=1)
+    expected = QueueStatistics(messages=2)
     assert stats == expected
 
     async with queue.receive() as message_handle_stream:
@@ -428,20 +421,15 @@ async def test_queue_statistics(
             pass
 
     stats = await queue.get_statistics()
-    expected_options = (
-        # we just received and acked the message we had NOT already received
-        QueueStatistics(total_messages_in_queue=1, undelivered_messages=1),
-        # we just received and acked the message we had already received
-        QueueStatistics(total_messages_in_queue=1, undelivered_messages=0),
-    )
-    assert stats in expected_options
+    expected = QueueStatistics(messages=1)
+    assert stats == expected
 
     async with queue.receive() as message_handle_stream:
         async with (await message_handle_stream.receive()).acquire():
             pass
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(total_messages_in_queue=0, undelivered_messages=0)
+    expected = QueueStatistics(messages=0)
     assert stats == expected
 
 
@@ -508,28 +496,6 @@ async def test_wait_for_completion_instant_poll(
             # fail fast during tests, this should be near instant
             with anyio.fail_after(1):
                 await handle.wait()
-
-
-async def test_send_with_custom_expiration(
-    queue: Queue,
-    migrated_pool: asyncpg.Pool,
-) -> None:
-    expiration = datetime.utcnow() + timedelta(seconds=5)
-    async with queue.send(b"", expire_at=expiration):
-        pass
-
-    # message is available
-    async with queue.receive() as message_handle_stream:
-        with anyio.fail_after(0.5):
-            await message_handle_stream.receive()
-
-    await anyio.sleep(5)
-
-    # no messages
-    async with queue.receive() as message_handle_stream:
-        with anyio.move_on_after(0.5) as scope:
-            await message_handle_stream.receive()
-        assert scope.cancel_called is True
 
 
 @pytest.mark.anyio
