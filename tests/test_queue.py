@@ -519,3 +519,67 @@ async def test_cancellation(
             await acquired.wait()
             await queue.cancel(*handle.messages.keys())
             await handle.wait()
+
+
+@pytest.mark.anyio
+async def test_dlq_max_delivery_attempts_expired(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+
+    await create_queue(
+        "test-queue",
+        migrated_pool,
+        max_delivery_attempts=1,
+    )
+
+    class MyExc(Exception):
+        pass
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.send(b'{"foo":"bar"}') as handle:
+            with pytest.raises(MyExc):
+                async with queue.receive() as message_handle_stream:
+                    async for message_handle in message_handle_stream:
+                        async with message_handle.acquire() as _:
+                            raise MyExc
+            await handle.wait()
+
+    received = False
+
+    async with connect_to_queue("test-queue_dlq", migrated_pool) as dlq:
+        async with dlq.receive() as message_handle_stream:
+            async for message_handle in message_handle_stream:
+                async with message_handle.acquire() as _:
+                    received = True
+                    break
+
+    assert received
+
+
+@pytest.mark.anyio
+async def test_dlq_expiration(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+
+    await create_queue(
+        "test-queue",
+        migrated_pool,
+        retention_period=timedelta(seconds=1),
+    )
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.send(b'{"foo":"bar"}') as handle:
+            # 1 sec for expiration and 1 sec for cleanup to run
+            await anyio.sleep(2)
+            await handle.wait()
+
+    received = False
+
+    async with connect_to_queue("test-queue_dlq", migrated_pool) as dlq:
+        async with dlq.receive() as message_handle_stream:
+            async for message_handle in message_handle_stream:
+                async with message_handle.acquire() as _:
+                    received = True
+                    break
+
+    assert received
