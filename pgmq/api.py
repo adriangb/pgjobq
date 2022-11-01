@@ -36,11 +36,7 @@ class Message:
 @dataclass(frozen=True, **_DATACLASSES_KW)
 class QueueStatistics:
     # total number of messages currently in the queue
-    total_messages_in_queue: int
-    # total number of messages that have never been delivered
-    # does not include messages that have been delivered and nacked
-    # or are pending re-delivery
-    undelivered_messages: int
+    messages: int
 
 
 class MessageHandle(Protocol):
@@ -104,7 +100,6 @@ class Queue(ABC):
         self,
         __body: bytes,
         *bodies: bytes,
-        expire_at: Optional[datetime] = ...,
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Put messages on the queue.

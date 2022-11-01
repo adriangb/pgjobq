@@ -34,6 +34,7 @@ def anyio_backend(request: Any) -> Any:
 
 
 @pytest.fixture(scope="session")
+@pytest.mark.anyio
 async def admin_db_conn(
     anyio_backend: Any,
 ) -> "AsyncGenerator[asyncpg.Connection, None]":
@@ -56,7 +57,7 @@ def test_db_name() -> str:
     return "".join(choices(ascii_lowercase, k=5))
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def pool(
     admin_db_conn: asyncpg.Connection,
     test_db_name: str,
@@ -70,18 +71,13 @@ async def pool(
             password=connection_config.password,
             database=test_db_name,
         ) as pool:
-            await migrate_to_latest_version(pool)
             yield pool
     finally:
         await admin_db_conn.execute(f"DROP DATABASE {test_db_name}")  # type: ignore
 
 
 @pytest.fixture
-async def migrated_pool(
-    pool: asyncpg.Pool,
-) -> asyncpg.Pool:
+async def migrated_pool(pool: asyncpg.Pool) -> asyncpg.Pool:
+    await pool.execute("DROP SCHEMA IF EXISTS pgmq CASCADE")  # type: ignore
     await migrate_to_latest_version(pool)
-    try:
-        yield pool
-    finally:
-        await pool.execute("DROP SCHEMA IF EXISTS pgmq CASCADE")
+    return pool
