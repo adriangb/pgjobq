@@ -23,8 +23,7 @@ create table pgmq.messages (
     expires_at timestamp not null,
     delivery_attempts_remaining integer not null,
     available_at timestamp not null,
-    body bytea not null,
-    succeeded boolean not null DEFAULT false
+    body bytea not null
 ) PARTITION BY LIST(queue_id);
 
 create table pgmq.queue_link_types(

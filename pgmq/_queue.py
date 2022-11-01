@@ -353,7 +353,7 @@ async def connect_to_queue(
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
-            await cleanup_dead_messages(conn)
+            await cleanup_dead_messages(conn, queue_name)
             await anyio.sleep(1)
 
     async def extend_acks(conn: asyncpg.Connection) -> None:
@@ -415,7 +415,7 @@ async def connect_to_queue(
             callback=process_new_message_notification,
         )
         async with anyio.create_task_group() as tg:
-            # tg.start_soon(run_cleanup, cleanup_conn)
+            tg.start_soon(run_cleanup, cleanup_conn)
             tg.start_soon(extend_acks, ack_conn)
 
             queue = Queue(
