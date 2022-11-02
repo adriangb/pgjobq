@@ -26,7 +26,11 @@ WITH queue_info AS (
 ), deleted_messages AS (
     DELETE FROM pgmq.messages
     USING messages_to_delete
-    WHERE pgmq.messages.id = messages_to_delete.id
+    WHERE (
+        pgmq.messages.queue_id = (SELECT id FROM queue_info)
+        AND
+        pgmq.messages.id = messages_to_delete.id
+    )
 ), dlq_messages AS (
     SELECT
         d.id AS id,
@@ -42,12 +46,11 @@ WITH queue_info AS (
             pgmq.queues.max_delivery_attempts AS max_delivery_attempts
         FROM pgmq.queue_links
         LEFT JOIN pgmq.queues ON (
-            parent_id = d.queue_id
-            AND
             link_type_id = (SELECT id FROM pgmq.queue_link_types WHERE name = 'dlq')
             AND
             pgmq.queue_links.child_id = pgmq.queues.id
         )
+        WHERE pgmq.queue_links.parent_id = d.queue_id
     ) dlq ON true
 )
 INSERT INTO pgmq.messages(

@@ -8,7 +8,7 @@ import asyncpg  # type: ignore
 import pytest
 from anyio.abc import TaskStatus
 
-from pgmq import Queue, connect_to_queue, create_queue, get_dlq_name
+from pgmq import OutgoingMessage, Queue, connect_to_queue, create_queue, get_dlq_name
 from pgmq.api import MessageHandle, QueueStatistics
 
 
@@ -583,3 +583,16 @@ async def test_dlq_expiration(
                     break
 
     assert received
+
+
+@pytest.mark.anyio
+async def test_send_with_attributes(
+    queue: Queue,
+) -> None:
+    async with queue.send(OutgoingMessage(b"", {"foo": "bar"})) as handle:
+        async with queue.receive() as message_handle_stream:
+            async for message_handle in message_handle_stream:
+                async with message_handle.acquire() as message:
+                    assert message.attributes == {"foo": "bar"}
+                    break
+        await handle.wait()

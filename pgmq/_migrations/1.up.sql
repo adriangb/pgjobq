@@ -23,7 +23,8 @@ create table pgmq.messages (
     expires_at timestamp not null,
     delivery_attempts_remaining integer not null,
     available_at timestamp not null,
-    body bytea not null
+    body bytea not null,
+    attributes jsonb
 ) PARTITION BY LIST(queue_id);
 
 create table pgmq.queue_link_types(
@@ -53,3 +54,37 @@ ON pgmq.messages(available_at);
 
 CREATE INDEX "pgmq.messages_expiration_idx"
 ON pgmq.messages(delivery_attempts_remaining, expires_at);
+
+-- Triggers for managing partitions
+CREATE OR REPLACE FUNCTION pgmq.create_message_partitions() RETURNS trigger AS
+$$
+DECLARE
+    messages_partition_table_name text;
+BEGIN
+    messages_partition_table_name :=  'messages_' || NEW.id::text;
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS pgmq.%I PARTITION OF pgmq.messages FOR VALUES IN (%L);',
+        messages_partition_table_name,
+        NEW.id
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "pgmq.create_message_partitions"
+AFTER INSERT ON pgmq.queues FOR EACH ROW
+EXECUTE PROCEDURE pgmq.create_message_partitions();
+
+CREATE OR REPLACE FUNCTION pgmq.drop_messages_partitions() RETURNS trigger AS
+$$
+DECLARE
+    messages_partition_table_name text;
+BEGIN
+    messages_partition_table_name :=  'messages_' || OLD.id::text;
+    EXECUTE format(
+        'DROP TABLE IF EXISTS pgmq.%I CASCADE;',
+        messages_partition_table_name
+    );
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;

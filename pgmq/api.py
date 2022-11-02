@@ -12,6 +12,8 @@ from typing import (
     Dict,
     Mapping,
     Optional,
+    Union,
+    overload,
 )
 from uuid import UUID
 
@@ -25,10 +27,20 @@ if sys.version_info >= (3, 10):  # pragma: no cover
     _DATACLASSES_KW["slots"] = True
 
 
+_ScalarValue = Union[str, int, float, bool, None]
+
+
 @dataclass(frozen=True, **_DATACLASSES_KW)
 class Message:
     id: UUID
     body: bytes
+    attributes: Dict[str, _ScalarValue]
+
+
+@dataclass(frozen=True, **_DATACLASSES_KW)
+class OutgoingMessage:
+    body: bytes
+    attributes: Optional[Dict[str, _ScalarValue]] = None
 
 
 @dataclass(frozen=True, **_DATACLASSES_KW)
@@ -99,10 +111,30 @@ class Queue(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
+    @overload
     def send(
         self,
         __body: bytes,
         *bodies: bytes,
+        schedule_at: Optional[datetime] = ...,
+    ) -> AsyncContextManager[CompletionHandle]:
+        ...  # pragma: no cover
+
+    @abstractmethod
+    @overload
+    def send(
+        self,
+        __body: OutgoingMessage,
+        *bodies: OutgoingMessage,
+        schedule_at: Optional[datetime] = ...,
+    ) -> AsyncContextManager[CompletionHandle]:
+        ...  # pragma: no cover
+
+    @abstractmethod
+    def send(
+        self,
+        __body: Union[bytes, OutgoingMessage],
+        *bodies: Union[bytes, OutgoingMessage],
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Put messages on the queue.

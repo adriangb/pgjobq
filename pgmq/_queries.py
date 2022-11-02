@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from datetime import datetime
 from functools import lru_cache
+from json import dumps as json_dumps
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 from uuid import UUID
@@ -13,6 +14,8 @@ else:
     from typing import TypedDict
 
 import asyncpg  # type: ignore
+
+from pgmq.api import OutgoingMessage
 
 PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
 Record = Mapping[str, Any]
@@ -32,12 +35,12 @@ def get_queries() -> Dict[str, str]:
     return res
 
 
-async def publish_messages_from_bytes(
+async def publish_messages(
     conn: PoolOrConnection,
     *,
     queue_name: str,
     ids: List[UUID],
-    bodies: List[bytes],
+    messages: List[OutgoingMessage],
     schedule_at: Optional[datetime],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
@@ -45,7 +48,8 @@ async def publish_messages_from_bytes(
         queue_name,
         schedule_at,
         ids,
-        bodies,
+        [m.body for m in messages],
+        [json_dumps(m.attributes) for m in messages],
     )
     if res is None:
         raise QueueDoesNotExist(queue_name=queue_name)
@@ -55,6 +59,7 @@ class MessageRecord(TypedDict):
     id: UUID
     body: bytes
     next_ack_deadline: datetime
+    attributes: Optional[str]
 
 
 async def poll_for_messages(

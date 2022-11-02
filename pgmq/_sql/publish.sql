@@ -12,7 +12,8 @@ INSERT INTO pgmq.messages(
     expires_at,
     delivery_attempts_remaining,
     available_at,
-    body
+    body,
+    attributes
 )
 SELECT
     queue_id,
@@ -20,6 +21,7 @@ SELECT
     COALESCE($2, now()::timestamp) + retention_period,
     max_delivery_attempts,
     COALESCE($2, now()::timestamp),
-    unnest($4::bytea[])
+    unnest($4::bytea[]),
+    unnest($5::jsonb[])
 FROM queue_info
 RETURNING queue_id;

@@ -6,6 +6,7 @@ from collections import defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from json import loads as json_loads
 from typing import (
     Any,
     AsyncContextManager,
@@ -17,6 +18,7 @@ from typing import (
     Mapping,
     Optional,
     Set,
+    Union,
 )
 from uuid import UUID, uuid4
 
@@ -33,11 +35,12 @@ from pgmq._queries import (
     get_statistics,
     nack_message,
     poll_for_messages,
-    publish_messages_from_bytes,
+    publish_messages,
 )
 from pgmq.api import CompletionHandle as AbstractCompletionHandle
 from pgmq.api import Message, MessageHandle
 from pgmq.api import MessageHandleStream as AbstractMessageHandleStream
+from pgmq.api import OutgoingMessage
 from pgmq.api import Queue as AbstractQueue
 from pgmq.api import QueueStatistics
 
@@ -180,7 +183,15 @@ class Queue(AbstractQueue):
                     managers = [
                         MessageManager(
                             pool=self.pool,
-                            message=Message(id=message["id"], body=message["body"]),
+                            message=Message(
+                                id=message["id"],
+                                body=message["body"],
+                                attributes=(
+                                    json_loads(message["attributes"])
+                                    if message["attributes"] is not None
+                                    else {}
+                                ),
+                            ),
                             queue_name=self.queue_name,
                             pending_messages=in_flight_messages,
                             queue=self,
@@ -225,17 +236,24 @@ class Queue(AbstractQueue):
 
     def send(
         self,
-        message: bytes,
-        *messages: bytes,
+        message_or_body: Union[bytes, OutgoingMessage],
+        *messages_or_bodies: Union[bytes, OutgoingMessage],
         schedule_at: Optional[datetime] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
-        bodies: List[bytes] = [message, *messages]  # type: ignore
-        ids = [uuid4() for _ in range(len(bodies))]
-        publish = publish_messages_from_bytes(
+        messages: List[OutgoingMessage]
+        if isinstance(message_or_body, bytes):
+            messages = [
+                OutgoingMessage(message_or_body),
+                *(OutgoingMessage(b) for b in messages_or_bodies),  # type: ignore
+            ]
+        else:
+            messages = [message_or_body, *messages_or_bodies]  # type: ignore
+        ids = [uuid4() for _ in range(len(messages))]
+        publish = publish_messages(
             conn=self.pool,
             queue_name=self.queue_name,
             ids=ids,
-            bodies=bodies,
+            messages=messages,
             schedule_at=schedule_at,
         )
 

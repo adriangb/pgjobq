@@ -8,14 +8,14 @@ WITH queue_info AS (
     WHERE name = $1
 ), available_messsages AS (
     SELECT
-        id,
-        queue_id,
-        delivery_attempts_remaining
+        pgmq.messages.id,
+        pgmq.messages.queue_id,
+        pgmq.messages.delivery_attempts_remaining
     FROM pgmq.messages
     WHERE (
         available_at < now()::timestamp
         AND
-        queue_id = (SELECT id FROM queue_info)
+        pgmq.messages.queue_id = (SELECT id FROM queue_info)
         AND
         expires_at > now()::timestamp
     )
@@ -28,5 +28,14 @@ SET
     available_at = now() + (SELECT ack_deadline FROM queue_info),
     delivery_attempts_remaining = available_messsages.delivery_attempts_remaining - 1
 FROM available_messsages
-WHERE pgmq.messages.id = available_messsages.id
-RETURNING pgmq.messages.id, available_at AS next_ack_deadline, body;
+WHERE (
+    pgmq.messages.queue_id = available_messsages.queue_id
+    AND
+    pgmq.messages.id = available_messsages.id
+)
+RETURNING
+    pgmq.messages.id,
+    available_at AS next_ack_deadline,
+    body,
+    pgmq.messages.attributes
+;
