@@ -16,27 +16,24 @@ There are plenty of use cases for a persistent queue that do not require infinit
 ## Features
 
 * Best effort at most once delivery (messages are only delivered to one worker at a time)
-* Automatic redelivery of failed messages
+* Automatic redelivery of failed messages (even if your process crashes)
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Low latency completion tracking (using `NOTIFY`)
-* Bulk sending and receiving
-* Fully typed async Python client (using [asyncpg])
+* Dead letter queuing
 * Persistent scheduled messages (scheduled in the database, not the client application)
+* Job cancellation (guaranteed for jobs in the queue and best effort for checked-out jobs)
+* Bulk sending and polling to support large workloads
+* Fully typed async Python client (using [asyncpg])
 
 Possible features:
 
 * Exponential backoffs
-* Dead letter queues
-* Custom delivery ordering key
-* Responses / completion messages
+* Reply-to queues and response handling
+* Dependencies between jobs
+* Job groups (e.g. to cancel them all together)
+* Job dependencies (for processing DAG-like workflows)
 * Message attributes and attribute filtering
-* FIFO delivery
 * Backpressure / bound queues
-
-Unplanned features:
-
-* Sending back response data (currently it needs to be sent out of band)
-* Supporting "subscriptions" (this is a simple queue, not a message broker)
 
 ## Examples
 
