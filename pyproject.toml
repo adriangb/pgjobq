@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pgjobq"
-version = "0.7.0"
+version = "0.8.0"
 description = "PostgreSQL backed job queues"
 authors = ["Adrian Garcia Badaracco <dev@adriangb.com>"]
 license = "MIT"
