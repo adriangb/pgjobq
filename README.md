@@ -27,9 +27,8 @@ There are plenty of use cases for a persistent queue that do not require infinit
 
 Possible features:
 
-* Exponential backoffs
+* Exponential backoffs for retries
 * Reply-to queues and response handling
-* Dependencies between jobs
 * Job groups (e.g. to cancel them all together)
 * Job dependencies (for processing DAG-like workflows)
 * Job attributes and attribute filtering
