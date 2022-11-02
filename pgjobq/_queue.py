@@ -156,7 +156,8 @@ class Queue(AbstractQueue):
     completion_callbacks: Dict[UUID, Set[anyio.Event]]
     new_job_callbacks: Set[Callable[[], None]]
     in_flight_jobs: Dict[UUID, Set[JobManager]]
-    _statistics: Optional[QueueStatistics] = None
+    statistics_updated: anyio.Event
+    statistics: Optional[QueueStatistics]
 
     @asynccontextmanager
     async def receive(
@@ -351,15 +352,22 @@ class Queue(AbstractQueue):
         return cm()
 
     async def _get_statistics(self) -> QueueStatistics:
-        if self._statistics is None:
+        if self.statistics is None:
             record = await get_statistics(self.pool, self.queue_name)
-            self._statistics = QueueStatistics(
+            self.statistics = QueueStatistics(
                 jobs=record["jobs"],
+                max_size=record["max_size"],
             )
-        return self._statistics
+        return self.statistics
 
     async def get_statistics(self) -> QueueStatistics:
         return await self._get_statistics()
+
+    async def wait_if_full(self) -> None:
+        stats = await self.get_statistics()
+        while stats.max_size is not None and stats.jobs >= stats.max_size:
+            await self.statistics_updated.wait()
+            stats = await self.get_statistics()
 
 
 @asynccontextmanager
@@ -389,6 +397,8 @@ async def connect_to_queue(
         completion_callbacks=completion_callbacks,
         new_job_callbacks=new_job_callbacks,
         in_flight_jobs=checked_out_jobs,
+        statistics_updated=anyio.Event(),
+        statistics=None,
     )
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
@@ -415,8 +425,10 @@ async def connect_to_queue(
         if not payload:
             return
         job_ids = payload.split(",")
-        if queue._statistics is not None:  # type: ignore
-            queue._statistics.jobs -= len(job_ids)  # type: ignore
+        if queue.statistics is not None:
+            queue.statistics.jobs -= len(job_ids)
+            queue.statistics_updated.set()
+            queue.statistics_updated = anyio.Event()
         for job_id in job_ids:
             job_id_key = UUID(job_id)
             events = completion_callbacks.get(job_id_key, None) or ()
@@ -430,8 +442,9 @@ async def connect_to_queue(
         payload: str,
     ) -> None:
         n = int(payload)
-        if queue._statistics is not None:  # type: ignore
-            queue._statistics.jobs += n  # type: ignore
+        if queue.statistics is not None:
+            queue.statistics.jobs += n
+            queue.statistics_updated = anyio.Event()
         for cb in new_job_callbacks:
             cb()
 

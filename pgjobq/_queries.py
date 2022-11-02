@@ -134,6 +134,7 @@ async def extend_ack_deadlines(
 
 class QueueStatisticsRecord(TypedDict):
     jobs: int
+    max_size: Optional[int]
 
 
 async def get_statistics(

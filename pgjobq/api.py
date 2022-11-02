@@ -50,6 +50,7 @@ class OutgoingJob:
 class QueueStatistics:
     # total number of jobs currently in the queue
     jobs: int
+    max_size: Optional[int]
 
 
 class JobHandle(Protocol):
@@ -210,4 +211,7 @@ class Queue(ABC):
         Returns:
             QueueStatistics: information on the current state of the queue.
         """
+        pass  # pragma: no cover
+
+    async def wait_if_full(self) -> None:
         pass  # pragma: no cover

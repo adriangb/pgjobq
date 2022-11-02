@@ -411,7 +411,7 @@ async def test_queue_statistics(
 ) -> None:
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(jobs=0)
+    expected = QueueStatistics(jobs=0, max_size=None)
     assert stats == expected
 
     async with queue.send(b"{}"):
@@ -420,7 +420,7 @@ async def test_queue_statistics(
         pass
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(jobs=2)
+    expected = QueueStatistics(jobs=2, max_size=None)
     assert stats == expected
 
     async with queue.receive() as job_handle_stream:
@@ -428,7 +428,7 @@ async def test_queue_statistics(
             pass
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(jobs=1)
+    expected = QueueStatistics(jobs=1, max_size=None)
     assert stats == expected
 
     async with queue.receive() as job_handle_stream:
@@ -436,7 +436,7 @@ async def test_queue_statistics(
             pass
 
     stats = await queue.get_statistics()
-    expected = QueueStatistics(jobs=0)
+    expected = QueueStatistics(jobs=0, max_size=None)
     assert stats == expected
 
 
@@ -688,3 +688,32 @@ async def test_dependencies(
                 async with job_handle.acquire() as job:
                     assert job.body == b"1"
                 await handle1.wait()
+
+
+@pytest.mark.anyio
+async def test_back_pressure(
+    migrated_pool: asyncpg.Pool,
+) -> None:
+    await create_queue(
+        "test-queue",
+        migrated_pool,
+        max_size=1,
+    )
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        done = anyio.Event()
+
+        async def wait_if_full() -> None:
+            await queue.wait_if_full()
+            done.set()
+
+        async with queue.send(b"1"):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(wait_if_full)
+                async with queue.receive() as job_handle_stream:
+                    job_handle = await job_handle_stream.receive()
+                    assert not done.is_set()
+                    async with job_handle.acquire() as _:
+                        pass
+                    with anyio.fail_after(1):
+                        await done.wait()

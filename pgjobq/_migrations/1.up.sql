@@ -13,7 +13,8 @@ create table pgjobq.queues (
     UNIQUE(name),
     ack_deadline interval not null,
     max_delivery_attempts integer not null,
-    retention_period interval not null
+    retention_period interval not null,
+    max_size bigint
 );
 
 create table pgjobq.jobs (

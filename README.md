@@ -25,13 +25,13 @@ There are plenty of use cases for a persistent queue that do not require infinit
 * Persistent scheduled jobs (scheduled in the database, not the client application)
 * Job cancellation (guaranteed for jobs in the queue and best effort for checked-out jobs)
 * Bulk sending and polling to support large workloads
+* Back pressure / bound queues
 * Fully typed async Python client (using [asyncpg])
 
 Possible features:
 
 * Exponential back off for retries
 * Reply-to queues and response handling
-* Back pressure / bound queues
 
 ## Examples
 
