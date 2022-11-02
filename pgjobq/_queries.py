@@ -44,6 +44,12 @@ async def publish_jobs(
     jobs: List[OutgoingJob],
     schedule_at: Optional[datetime],
 ) -> None:
+    # (child_id, parent_id)
+    deps = [
+        (ids[idx], parent_id)
+        for idx in range(len(ids))
+        for parent_id in jobs[idx].dependencies
+    ]
     res: Optional[int] = await conn.fetchval(  # type: ignore
         get_queries()["publish"],
         queue_name,
@@ -51,6 +57,8 @@ async def publish_jobs(
         ids,
         [m.body for m in jobs],
         [json_dumps(m.attributes) for m in jobs],
+        [dep[0] for dep in deps],  # child_id
+        [dep[1] for dep in deps],  # parent_id
     )
     if res is None:
         raise QueueDoesNotExist(queue_name=queue_name)

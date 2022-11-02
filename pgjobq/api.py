@@ -12,6 +12,7 @@ from typing import (
     Dict,
     Mapping,
     Optional,
+    Sequence,
     Union,
     overload,
 )
@@ -42,6 +43,7 @@ class Job:
 class OutgoingJob:
     body: bytes
     attributes: Optional[Dict[str, _ScalarValue]] = None
+    dependencies: Sequence[UUID] = ()
 
 
 @dataclass(frozen=True, **_DATACLASSES_KW)

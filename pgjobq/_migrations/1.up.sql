@@ -27,6 +27,18 @@ create table pgjobq.jobs (
     attributes jsonb
 ) PARTITION BY LIST(queue_id);
 
+create table pgjobq.predecessors (
+    queue_id serial references pgjobq.queues on delete cascade not null,
+    child_id uuid not null,
+    parent_id uuid not null,
+    PRIMARY KEY(queue_id, parent_id, child_id),
+    FOREIGN KEY (queue_id, child_id) REFERENCES pgjobq.jobs (queue_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (queue_id, parent_id) REFERENCES pgjobq.jobs (queue_id, id) ON DELETE CASCADE
+);
+
+-- For looking up "all of this job's parents" when we ack or cancel a job
+CREATE INDEX "pgjobq.predecessors_child_id_idx" ON pgjobq.predecessors(child_id);
+
 create table pgjobq.queue_link_types(
     id serial primary key,
     name text not null,

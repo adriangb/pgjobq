@@ -5,6 +5,12 @@ WITH queue_info AS (
         retention_period
     FROM pgjobq.queues
     WHERE name = $1
+), dependencies AS (
+    INSERT INTO pgjobq.predecessors(queue_id, child_id, parent_id)
+    SELECT
+        (SELECT queue_id FROM queue_info),
+        unnest($6::uuid[]),
+        unnest($7::uuid[])
 )
 INSERT INTO pgjobq.jobs(
     queue_id,

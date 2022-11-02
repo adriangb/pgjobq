@@ -649,3 +649,22 @@ async def test_receive_filter_attributes(
                 break
 
     assert received == 2
+
+
+@pytest.mark.anyio
+async def test_dependencies(
+    queue: Queue,
+) -> None:
+    async with queue.send(b"1") as handle1:
+        async with queue.send(
+            OutgoingJob(b"2", dependencies=list(handle1.jobs.keys()))
+        ) as handle2:
+            async with queue.receive() as job_handle_stream:
+                job_handle = await job_handle_stream.receive()
+                async with job_handle.acquire() as job:
+                    assert job.body == b"2"
+                await handle2.wait()
+                job_handle = await job_handle_stream.receive()
+                async with job_handle.acquire() as job:
+                    assert job.body == b"1"
+                await handle1.wait()

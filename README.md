@@ -20,6 +20,8 @@ There are plenty of use cases for a persistent queue that do not require infinit
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Low latency completion tracking (using `NOTIFY`)
 * Dead letter queuing
+* Job attributes and attribute filtering
+* Job dependencies (for processing DAG-like workflows or making jobs process FIFO)
 * Persistent scheduled jobs (scheduled in the database, not the client application)
 * Job cancellation (guaranteed for jobs in the queue and best effort for checked-out jobs)
 * Bulk sending and polling to support large workloads
@@ -27,12 +29,9 @@ There are plenty of use cases for a persistent queue that do not require infinit
 
 Possible features:
 
-* Exponential backoffs for retries
+* Exponential back off for retries
 * Reply-to queues and response handling
-* Job groups (e.g. to cancel them all together)
-* Job dependencies (for processing DAG-like workflows)
-* Job attributes and attribute filtering
-* Backpressure / bound queues
+* Back pressure / bound queues
 
 ## Examples
 

@@ -18,6 +18,8 @@ WITH queue_info AS (
         pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
         AND
         expires_at > now()::timestamp
+        AND
+        NOT EXISTS(SELECT * FROM pgjobq.predecessors WHERE parent_id = pgjobq.jobs.id)
         {where}
     )
     ORDER BY id -- to avoid deadlocks under concurrency
