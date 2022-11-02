@@ -18,6 +18,7 @@ WITH queue_info AS (
         pgmq.messages.queue_id = (SELECT id FROM queue_info)
         AND
         expires_at > now()::timestamp
+        {where}
     )
     ORDER BY id -- to avoid deadlocks under concurrency
     LIMIT $2

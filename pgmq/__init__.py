@@ -1,4 +1,5 @@
 from pgmq._crud import create_queue, delete_queue
+from pgmq._filters import Attribute
 from pgmq._migrations import migrate_to_latest_version
 from pgmq._queue import connect_to_queue
 from pgmq.api import OutgoingMessage, Queue
@@ -17,4 +18,5 @@ __all__ = (
     "migrate_to_latest_version",
     "Queue",
     "OutgoingMessage",
+    "Attribute",
 )

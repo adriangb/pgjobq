@@ -22,10 +22,11 @@ if sys.version_info < (3, 8):  # pragma: no cover
 else:
     from typing import Protocol
 
+from pgmq._filters import BaseClause
+
 _DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
     _DATACLASSES_KW["slots"] = True
-
 
 _ScalarValue = Union[str, int, float, bool, None]
 
@@ -85,8 +86,10 @@ class Queue(ABC):
     @abstractmethod
     def receive(
         self,
+        *,
         batch_size: int = 1,
         poll_interval: float = 1,
+        filter: Optional[BaseClause] = None,
     ) -> AsyncContextManager[MessageHandleStream]:
         """Poll for a batch of messages.
 

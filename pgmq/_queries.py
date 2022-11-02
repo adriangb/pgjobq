@@ -15,6 +15,7 @@ else:
 
 import asyncpg  # type: ignore
 
+from pgmq._filters import BaseClause
 from pgmq.api import OutgoingMessage
 
 PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
@@ -67,11 +68,16 @@ async def poll_for_messages(
     *,
     queue_name: str,
     batch_size: int,
+    filter: Optional[BaseClause],
 ) -> Sequence[MessageRecord]:
+    params: List[Any] = [queue_name, batch_size]
+    if filter:
+        where = f"AND ({filter.get_value(params)})"
+    else:
+        where = ""
     return await conn.fetch(  # type: ignore
-        get_queries()["poll"],
-        queue_name,
-        batch_size,
+        get_queries()["poll"].format(where=where),
+        *params,
     )
 
 

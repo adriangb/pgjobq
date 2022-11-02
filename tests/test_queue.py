@@ -8,7 +8,14 @@ import asyncpg  # type: ignore
 import pytest
 from anyio.abc import TaskStatus
 
-from pgmq import OutgoingMessage, Queue, connect_to_queue, create_queue, get_dlq_name
+from pgmq import (
+    Attribute,
+    OutgoingMessage,
+    Queue,
+    connect_to_queue,
+    create_queue,
+    get_dlq_name,
+)
 from pgmq.api import MessageHandle, QueueStatistics
 
 
@@ -596,3 +603,49 @@ async def test_send_with_attributes(
                     assert message.attributes == {"foo": "bar"}
                     break
         await handle.wait()
+
+
+@pytest.mark.anyio
+async def test_receive_filter_attributes(
+    queue: Queue,
+) -> None:
+    filter = Attribute("foo").is_like("GOOD%")
+    async with queue.send(OutgoingMessage(b"", {"foo": "VERY BAD", "baz": None})):
+        pass
+    async with queue.send(OutgoingMessage(b"", {"baz": 1, "foo": "..."})):
+        pass
+
+    received = 0
+
+    async with queue.send(OutgoingMessage(b"", {"foo": "VERY BAD"})):
+        pass
+    async with queue.receive(filter=filter) as message_handle_stream:
+        with anyio.move_on_after(1):
+            await message_handle_stream.receive()
+            received += 1
+
+    assert received == 0
+
+    async with queue.send(OutgoingMessage(b"", {"foo": "GOOD!"})):
+        pass
+    async with queue.receive(filter=filter) as message_handle_stream:
+        async for message_handle in message_handle_stream:
+            async with message_handle.acquire() as message:
+                assert message.attributes == {"foo": "GOOD!"}
+                received += 1
+                break
+
+    assert received == 1
+
+    filter = filter | (
+        Attribute("baz").does_not_exist() & Attribute("foo").is_not_null()
+    )
+
+    async with queue.receive(filter=filter) as message_handle_stream:
+        async for message_handle in message_handle_stream:
+            async with message_handle.acquire() as message:
+                assert message.attributes == {"foo": "VERY BAD"}
+                received += 1
+                break
+
+    assert received == 2

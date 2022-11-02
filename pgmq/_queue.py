@@ -26,6 +26,7 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
+from pgmq._filters import BaseClause
 from pgmq._queries import (
     ack_message,
     cancel_messages,
@@ -159,8 +160,10 @@ class Queue(AbstractQueue):
     @asynccontextmanager
     async def receive(
         self,
+        *,
         batch_size: int = 1,
         poll_interval: float = 1,
+        filter: Optional[BaseClause] = None,
     ) -> AsyncIterator[AbstractMessageHandleStream]:
 
         in_flight_messages: Set[MessageManager] = set()
@@ -179,6 +182,7 @@ class Queue(AbstractQueue):
                         conn,
                         queue_name=self.queue_name,
                         batch_size=batch_size,
+                        filter=filter,
                     )
                     managers = [
                         MessageManager(
