@@ -22,7 +22,7 @@ if sys.version_info < (3, 8):  # pragma: no cover
 else:
     from typing import Protocol
 
-from pgmq._filters import BaseClause
+from pgjobq._filters import BaseClause
 
 _DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
@@ -32,26 +32,26 @@ _ScalarValue = Union[str, int, float, bool, None]
 
 
 @dataclass(frozen=True, **_DATACLASSES_KW)
-class Message:
+class Job:
     id: UUID
     body: bytes
     attributes: Dict[str, _ScalarValue]
 
 
 @dataclass(frozen=True, **_DATACLASSES_KW)
-class OutgoingMessage:
+class OutgoingJob:
     body: bytes
     attributes: Optional[Dict[str, _ScalarValue]] = None
 
 
 @dataclass(frozen=True, **_DATACLASSES_KW)
 class QueueStatistics:
-    # total number of messages currently in the queue
-    messages: int
+    # total number of jobs currently in the queue
+    jobs: int
 
 
-class MessageHandle(Protocol):
-    def acquire(self) -> AsyncContextManager[Message]:
+class JobHandle(Protocol):
+    def acquire(self) -> AsyncContextManager[Job]:
         ...
 
 
@@ -62,23 +62,23 @@ class CompletionEvent(Protocol):
 
 class CompletionHandle(Protocol):
     @property
-    def messages(self) -> Mapping[UUID, CompletionEvent]:
-        """Completion events for each published message"""
+    def jobs(self) -> Mapping[UUID, CompletionEvent]:
+        """Completion events for each published job"""
         ...
 
     async def wait(self) -> None:
-        """Wait for all messages to complete"""
+        """Wait for all jobs to complete"""
         ...
 
 
-class MessageHandleStream(Protocol):
-    def __aiter__(self) -> AsyncIterator[MessageHandle]:
+class JobHandleStream(Protocol):
+    def __aiter__(self) -> AsyncIterator[JobHandle]:
         ...
 
-    def __anext__(self) -> Awaitable[MessageHandle]:
+    def __anext__(self) -> Awaitable[JobHandle]:
         ...
 
-    def receive(self) -> Awaitable[MessageHandle]:
+    def receive(self) -> Awaitable[JobHandle]:
         ...
 
 
@@ -90,26 +90,26 @@ class Queue(ABC):
         batch_size: int = 1,
         poll_interval: float = 1,
         filter: Optional[BaseClause] = None,
-    ) -> AsyncContextManager[MessageHandleStream]:
-        """Poll for a batch of messages.
+    ) -> AsyncContextManager[JobHandleStream]:
+        """Poll for a batch of jobs.
 
-        Will wait until at least one and up to `batch_size` messages are available
+        Will wait until at least one and up to `batch_size` jobs are available
         by periodically checking the queue every `poll_interval` seconds.
 
-        When a new message is put on the queue a notification is sent that will cause
+        When a new job is put on the queue a notification is sent that will cause
         immediate polling, thus in practice the latency will be much lower than
         poll interval.
         This mechanism is however not 100% reliable so worst case latency is still
         `poll_interval`.
 
         Args:
-            batch_size (int, optional): maximum number of messages to gether.
+            batch_size (int, optional): maximum number of jobs to gether.
                 Defaults to 1.
             poll_interval (float, optional): interval between polls of the queue.
                 Defaults to 1.
 
         Returns:
-            AsyncContextManager[MessageHandleStream]: An iterator over messages.
+            AsyncContextManager[JobHandleStream]: An iterator over jobs.
         """
         pass  # pragma: no cover
 
@@ -127,8 +127,8 @@ class Queue(ABC):
     @overload
     def send(
         self,
-        __body: OutgoingMessage,
-        *bodies: OutgoingMessage,
+        __body: OutgoingJob,
+        *bodies: OutgoingJob,
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         ...  # pragma: no cover
@@ -136,34 +136,34 @@ class Queue(ABC):
     @abstractmethod
     def send(
         self,
-        __body: Union[bytes, OutgoingMessage],
-        *bodies: Union[bytes, OutgoingMessage],
+        __body: Union[bytes, OutgoingJob],
+        *bodies: Union[bytes, OutgoingJob],
         schedule_at: Optional[datetime] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
-        """Put messages on the queue.
+        """Put jobs on the queue.
 
         You _must_ enter the context manager but awaiting the completion
         handle is optional.
 
         Args:
-            body (bytes): arbitrary bytes, the body of the message.
+            body (bytes): arbitrary bytes, the body of the job.
 
         Returns:
-            AsyncContextManager[MessageCompletionHandle]
+            AsyncContextManager[JobCompletionHandle]
         """
         pass  # pragma: no cover
 
     @abstractmethod
     def wait_for_completion(
         self,
-        message: UUID,
-        *messages: UUID,
+        job: UUID,
+        *jobs: UUID,
         poll_interval: timedelta = timedelta(seconds=10),
     ) -> AsyncContextManager[CompletionHandle]:
-        """Wait for a message or group of messages to complete
+        """Wait for a job or group of jobs to complete
 
         Args:
-            message (UUID): message ID as returned by Queue.send()
+            job (UUID): job ID as returned by Queue.send()
             poll_interval (timedelta, optional): interval to poll for completion. Defaults to 10 seconds.
 
         Returns:
@@ -174,13 +174,13 @@ class Queue(ABC):
     @abstractmethod
     def cancel(
         self,
-        message: UUID,
-        *messages: UUID,
+        job: UUID,
+        *jobs: UUID,
     ) -> Awaitable[None]:
-        """Cancel in-flight messages
+        """Cancel in-flight jobs
 
         Args:
-            message (UUID): message ID as returned by Queue.send()
+            job (UUID): job ID as returned by Queue.send()
         """
         pass  # pragma: no cover
 

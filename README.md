@@ -1,6 +1,6 @@
-# pgmq
+# pgjobq
 
-A message queue built on top of Postgres.
+A job queue built on top of Postgres.
 
 ## Project status
 
@@ -11,16 +11,16 @@ At some point I may decide to support this long term (at which point this warnin
 
 Sometimes you have a Postgres database and need a queue.
 You could stand up more infrastructure (SQS, Redis, etc), or you could use your existing database.
-There are plenty of use cases for a persistent queue that do not require infinite scalability, snapshots or any of the other advanced features full fledged queues/event buses/message brokers have.
+There are plenty of use cases for a persistent queue that do not require infinite scalability, snapshots or any of the other advanced features full fledged queues/event buses/job brokers have.
 
 ## Features
 
-* Best effort at most once delivery (messages are only delivered to one worker at a time)
-* Automatic redelivery of failed messages (even if your process crashes)
+* Best effort at most once delivery (jobs are only delivered to one worker at a time)
+* Automatic redelivery of failed jobs (even if your process crashes)
 * Low latency delivery (near realtime, uses PostgreSQL's `NOTIFY` feature)
 * Low latency completion tracking (using `NOTIFY`)
 * Dead letter queuing
-* Persistent scheduled messages (scheduled in the database, not the client application)
+* Persistent scheduled jobs (scheduled in the database, not the client application)
 * Job cancellation (guaranteed for jobs in the queue and best effort for checked-out jobs)
 * Bulk sending and polling to support large workloads
 * Fully typed async Python client (using [asyncpg])
@@ -32,7 +32,7 @@ Possible features:
 * Dependencies between jobs
 * Job groups (e.g. to cancel them all together)
 * Job dependencies (for processing DAG-like workflows)
-* Message attributes and attribute filtering
+* Job attributes and attribute filtering
 * Backpressure / bound queues
 
 ## Examples
@@ -42,7 +42,7 @@ from contextlib import AsyncExitStack
 
 import anyio
 import asyncpg  # type: ignore
-from pgmq import create_queue, connect_to_queue, migrate_to_latest_version
+from pgjobq import create_queue, connect_to_queue, migrate_to_latest_version
 
 async def main() -> None:
 
@@ -61,7 +61,7 @@ async def main() -> None:
 
             async def worker() -> None:
                 async with queue.receive() as msg_handle_rcv_stream:
-                    # receive a single message
+                    # receive a single job
                     async with (await msg_handle_rcv_stream.receive()).acquire():
                         print("received")
                         # do some work

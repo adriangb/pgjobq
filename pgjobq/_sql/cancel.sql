@@ -4,10 +4,10 @@ WITH queue_info AS (
         name,
         max_delivery_attempts,
         retention_period
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
 )
-DELETE FROM pgmq.messages
+DELETE FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
         AND
@@ -17,5 +17,5 @@ DELETE FROM pgmq.messages
         id,
         queue_id,
         body,
-        (SELECT pg_notify('pgmq.message_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
+        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
 ;

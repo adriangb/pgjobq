@@ -1,9 +1,9 @@
 WITH queue_info AS (
     SELECT
         id
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
 )
-SELECT count(*) AS messages
-FROM pgmq.messages
+SELECT count(*) AS jobs
+FROM pgjobq.jobs
 WHERE queue_id = (SELECT id FROM queue_info);

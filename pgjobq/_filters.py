@@ -41,7 +41,7 @@ class ComparisonClause(BaseClause):
 
     def get_value(self, params: List[ScalarValue]) -> str:
         params.append(self.value)
-        return f"(pgmq.messages.attributes ? '{self.attribute}' AND pgmq.messages.attributes->>'{self.attribute}' {self.operator} ${len(params)})"
+        return f"(pgjobq.jobs.attributes ? '{self.attribute}' AND pgjobq.jobs.attributes->>'{self.attribute}' {self.operator} ${len(params)})"
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class NullClause(BaseClause):
 
     def get_value(self, params: List[ScalarValue]) -> str:
         flip = "NOT " if self.not_ else ""
-        return f"(pgmq.messages.attributes ? '{self.attribute}' AND pgmq.messages.attributes->>'{self.attribute}' IS {flip}NULL)"
+        return f"(pgjobq.jobs.attributes ? '{self.attribute}' AND pgjobq.jobs.attributes->>'{self.attribute}' IS {flip}NULL)"
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class LikeClause(BaseClause):
     def get_value(self, params: List[ScalarValue]) -> str:
         flip = "NOT " if self.not_ else ""
         params.append(self.value)
-        return f"(pgmq.messages.attributes ? '{self.attribute}' AND pgmq.messages.attributes->>'{self.attribute}' {flip}LIKE ${len(params)})"
+        return f"(pgjobq.jobs.attributes ? '{self.attribute}' AND pgjobq.jobs.attributes->>'{self.attribute}' {flip}LIKE ${len(params)})"
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class ExistsClause(BaseClause):
 
     def get_value(self, params: List[ScalarValue]) -> str:
         flip = "NOT" if self.not_ else ""
-        return f"{flip}( pgmq.messages.attributes ? '{self.attribute}')"
+        return f"{flip}( pgjobq.jobs.attributes ? '{self.attribute}')"
 
 
 @dataclass

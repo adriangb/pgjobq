@@ -6,7 +6,7 @@ import asyncpg  # type: ignore
 import pytest
 from pydantic import BaseSettings
 
-from pgmq import migrate_to_latest_version
+from pgjobq import migrate_to_latest_version
 
 
 class TestPostgresConnectionConfig(BaseSettings):
@@ -78,6 +78,6 @@ async def pool(
 
 @pytest.fixture
 async def migrated_pool(pool: asyncpg.Pool) -> asyncpg.Pool:
-    await pool.execute("DROP SCHEMA IF EXISTS pgmq CASCADE")  # type: ignore
+    await pool.execute("DROP SCHEMA IF EXISTS pgjobq CASCADE")  # type: ignore
     await migrate_to_latest_version(pool)
     return pool

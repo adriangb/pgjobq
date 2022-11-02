@@ -3,7 +3,7 @@ from datetime import timedelta
 import asyncpg  # type: ignore
 import pytest
 
-from pgmq import create_queue, delete_queue
+from pgjobq import create_queue, delete_queue
 
 
 @pytest.mark.anyio

@@ -15,8 +15,8 @@ else:
 
 import asyncpg  # type: ignore
 
-from pgmq._filters import BaseClause
-from pgmq.api import OutgoingMessage
+from pgjobq._filters import BaseClause
+from pgjobq.api import OutgoingJob
 
 PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
 Record = Mapping[str, Any]
@@ -36,12 +36,12 @@ def get_queries() -> Dict[str, str]:
     return res
 
 
-async def publish_messages(
+async def publish_jobs(
     conn: PoolOrConnection,
     *,
     queue_name: str,
     ids: List[UUID],
-    messages: List[OutgoingMessage],
+    jobs: List[OutgoingJob],
     schedule_at: Optional[datetime],
 ) -> None:
     res: Optional[int] = await conn.fetchval(  # type: ignore
@@ -49,27 +49,27 @@ async def publish_messages(
         queue_name,
         schedule_at,
         ids,
-        [m.body for m in messages],
-        [json_dumps(m.attributes) for m in messages],
+        [m.body for m in jobs],
+        [json_dumps(m.attributes) for m in jobs],
     )
     if res is None:
         raise QueueDoesNotExist(queue_name=queue_name)
 
 
-class MessageRecord(TypedDict):
+class JobRecord(TypedDict):
     id: UUID
     body: bytes
     next_ack_deadline: datetime
     attributes: Optional[str]
 
 
-async def poll_for_messages(
+async def poll_for_jobs(
     conn: PoolOrConnection,
     *,
     queue_name: str,
     batch_size: int,
     filter: Optional[BaseClause],
-) -> Sequence[MessageRecord]:
+) -> Sequence[JobRecord]:
     params: List[Any] = [queue_name, batch_size]
     if filter:
         where = f"AND ({filter.get_value(params)})"
@@ -81,23 +81,23 @@ async def poll_for_messages(
     )
 
 
-async def ack_message(
+async def ack_job(
     conn: PoolOrConnection,
     queue_name: str,
-    message_id: UUID,
+    job_id: UUID,
 ) -> None:
-    await conn.execute(get_queries()["ack"], queue_name, message_id)  # type: ignore
+    await conn.execute(get_queries()["ack"], queue_name, job_id)  # type: ignore
 
 
-async def nack_message(
+async def nack_job(
     conn: PoolOrConnection,
     queue_name: str,
-    message_id: UUID,
+    job_id: UUID,
 ) -> None:
-    await conn.execute(get_queries()["nack"], queue_name, message_id)  # type: ignore
+    await conn.execute(get_queries()["nack"], queue_name, job_id)  # type: ignore
 
 
-async def cancel_messages(
+async def cancel_jobs(
     conn: PoolOrConnection,
     queue_name: str,
     ids: List[UUID],
@@ -108,17 +108,17 @@ async def cancel_messages(
 async def extend_ack_deadlines(
     conn: PoolOrConnection,
     queue_name: str,
-    message_ids: Sequence[UUID],
+    job_ids: Sequence[UUID],
 ) -> Optional[datetime]:
     return await conn.fetchval(  # type: ignore
         get_queries()["heartbeat"],
         queue_name,
-        list(message_ids),
+        list(job_ids),
     )
 
 
 class QueueStatisticsRecord(TypedDict):
-    messages: int
+    jobs: int
 
 
 async def get_statistics(
@@ -133,18 +133,18 @@ async def get_statistics(
     return record
 
 
-async def get_completed_messages(
+async def get_completed_jobs(
     conn: PoolOrConnection,
     queue_name: str,
-    message_ids: List[UUID],
+    job_ids: List[UUID],
 ) -> Sequence[UUID]:
     records: List[Record] = await conn.fetch(  # type: ignore
-        get_queries()["gather_completed"], queue_name, message_ids
+        get_queries()["gather_completed"], queue_name, job_ids
     )
     return [record["id"] for record in records]
 
 
-async def cleanup_dead_messages(
+async def cleanup_dead_jobs(
     conn: PoolOrConnection,
     queue_name: str,
 ) -> None:

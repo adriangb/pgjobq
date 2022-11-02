@@ -3,10 +3,10 @@ WITH queue_info AS (
         id AS queue_id,
         max_delivery_attempts,
         retention_period
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
 )
-INSERT INTO pgmq.messages(
+INSERT INTO pgjobq.jobs(
     queue_id,
     id,
     expires_at,

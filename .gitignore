@@ -4,7 +4,7 @@
 !/.github/
 !/.flake8
 !/.pre-commit-config.yaml
-!/pgmq/
+!/pgjobq/
 !/tests/
 !/Makefile
 !/pyproject.toml

@@ -2,18 +2,18 @@ WITH queue_info AS (
     SELECT
         id,
         ack_deadline
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
-), selected_messages AS (
+), selected_jobs AS (
     SELECT
         id
-    FROM pgmq.messages
+    FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
         AND
         id = any($2::uuid[])
         AND
-        -- skip any messages that already expired
+        -- skip any jobs that already expired
         -- this avoids race conditions between
         -- extending deadlines and nacking
         available_at > now()
@@ -21,17 +21,17 @@ WITH queue_info AS (
     ORDER BY id
     FOR UPDATE
 )
-UPDATE pgmq.messages
+UPDATE pgjobq.jobs
 SET available_at = (
     now() + (
         SELECT ack_deadline
         FROM queue_info
     )
 )
-FROM selected_messages
+FROM selected_jobs
 WHERE (
-    pgmq.messages.queue_id = (SELECT id FROM queue_info)
+    pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
     AND
-    pgmq.messages.id = selected_messages.id
+    pgjobq.jobs.id = selected_jobs.id
 )
 RETURNING available_at AS next_ack_deadline;

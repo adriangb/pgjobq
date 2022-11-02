@@ -28,7 +28,7 @@ DEFAULT_QUEUE_OPTIONS = QueueOptions()
 
 
 CREATE = """\
-INSERT INTO pgmq.queues(name, ack_deadline, max_delivery_attempts, retention_period)
+INSERT INTO pgjobq.queues(name, ack_deadline, max_delivery_attempts, retention_period)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT DO NOTHING
 RETURNING id;
@@ -53,18 +53,18 @@ async def _create(
 LINK = """\
 WITH parent AS (
     SELECT id
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
 ), child AS (
     SELECT id
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $2
 ), relationship_type AS (
     SELECT id
-    FROM pgmq.queue_link_types
+    FROM pgjobq.queue_link_types
     WHERE name = $3
 )
-INSERT INTO pgmq.queue_links(parent_id, child_id, link_type_id)
+INSERT INTO pgjobq.queue_links(parent_id, child_id, link_type_id)
 SELECT
     (SELECT id FROM parent),
     (SELECT id FROM child),
@@ -143,7 +143,7 @@ async def create_queue(
 
 DELETE = """\
 DELETE
-FROM pgmq.queues
+FROM pgjobq.queues
 WHERE name = $1
 RETURNING 1
 """

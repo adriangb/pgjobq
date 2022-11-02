@@ -5,7 +5,7 @@ WITH input AS (
 ), queue_info AS (
     SELECT
         id
-    FROM pgmq.queues
+    FROM pgjobq.queues
     WHERE name = $1
 )
 SELECT
@@ -13,10 +13,10 @@ SELECT
 FROM input
 WHERE NOT EXISTS(
     SELECT *
-    FROM pgmq.messages
+    FROM pgjobq.jobs
     WHERE (
-        pgmq.messages.id = input.id
+        pgjobq.jobs.id = input.id
         AND
-        pgmq.messages.queue_id = (SELECT id FROM queue_info)
+        pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
     )
 );
