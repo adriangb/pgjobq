@@ -6,16 +6,22 @@ WITH queue_info AS (
         retention_period
     FROM pgjobq.queues
     WHERE name = $1
-)
-DELETE FROM pgjobq.jobs
+), selected_jobs AS (
+    SELECT
+        id,
+        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
+    FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
-        AND
-        id = any($2::uuid[])
+        {where}
     )
-    RETURNING
-        id,
-        queue_id,
-        body,
-        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
-;
+    ORDER BY id
+    FOR UPDATE
+)
+DELETE FROM pgjobq.jobs
+USING selected_jobs
+WHERE (
+    pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
+    AND
+    pgjobq.jobs.id = selected_jobs.id
+);

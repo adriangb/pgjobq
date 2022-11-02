@@ -26,7 +26,7 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
-from pgjobq._filters import BaseClause
+from pgjobq._filters import BaseClause, JobIdIn
 from pgjobq._queries import (
     ack_job,
     cancel_jobs,
@@ -271,8 +271,13 @@ class Queue(AbstractQueue):
 
         return cm()
 
-    async def cancel(self, job: UUID, *jobs: UUID) -> None:
-        await cancel_jobs(self.pool, self.queue_name, [job, *jobs])
+    async def cancel(self, job_or_filter: Union[UUID, BaseClause], *jobs: UUID) -> None:
+        filter: BaseClause
+        if isinstance(job_or_filter, UUID):
+            filter = JobIdIn(ids=[job_or_filter, *jobs])
+        else:
+            filter = job_or_filter
+        await cancel_jobs(self.pool, self.queue_name, filter)
 
     def wait_for_completion(
         self,

@@ -173,10 +173,27 @@ class Queue(ABC):
         """
         pass  # pragma: no cover
 
+    @overload
     @abstractmethod
     def cancel(
         self,
-        job: UUID,
+        __filter: BaseClause,
+    ) -> Awaitable[None]:
+        ...
+
+    @overload
+    @abstractmethod
+    def cancel(
+        self,
+        __job: UUID,
+        *jobs: UUID,
+    ) -> Awaitable[None]:
+        ...
+
+    @abstractmethod
+    def cancel(
+        self,
+        __job_or_filter: Union[UUID, BaseClause],
         *jobs: UUID,
     ) -> Awaitable[None]:
         """Cancel in-flight jobs

@@ -108,9 +108,15 @@ async def nack_job(
 async def cancel_jobs(
     conn: PoolOrConnection,
     queue_name: str,
-    ids: List[UUID],
+    filter: BaseClause,
 ) -> None:
-    await conn.execute(get_queries()["cancel"], queue_name, ids)  # type: ignore
+    params = [queue_name]
+    if filter:
+        where = f"AND ({filter.get_value(params)})"
+    else:
+        where = ""
+    query = get_queries()["cancel"].format(where=where)
+    await conn.execute(query, *params)  # type: ignore
 
 
 async def extend_ack_deadlines(

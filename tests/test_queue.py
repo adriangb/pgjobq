@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from time import time
-from typing import AsyncGenerator, List, Set
+from typing import AsyncGenerator, List, Optional, Set
 from uuid import UUID
 
 import anyio
@@ -526,6 +526,26 @@ async def test_cancellation(
             await acquired.wait()
             await queue.cancel(*handle.jobs.keys())
             await handle.wait()
+
+
+@pytest.mark.anyio
+async def test_cancellation_with_filter(
+    queue: Queue,
+) -> None:
+    received_job: Optional[bytes] = None
+
+    async with queue.send(OutgoingJob(b"1", attributes={"foo": 1})) as handle1:
+        async with queue.send(OutgoingJob(b"2", attributes={"foo": 2})) as handle2:
+            await queue.cancel(Attribute("foo").eq(1))
+            await handle1.wait()
+            async with queue.receive() as job_handle_stream:
+                async for job_handle in job_handle_stream:
+                    async with job_handle.acquire() as job:
+                        received_job = job.body
+                        break
+                await handle2.wait()
+
+    assert received_job == b"2"
 
 
 @pytest.mark.anyio

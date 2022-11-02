@@ -1,5 +1,5 @@
 from pgjobq._crud import create_queue, delete_queue
-from pgjobq._filters import Attribute
+from pgjobq._filters import Attribute, JobIdIn
 from pgjobq._migrations import migrate_to_latest_version
 from pgjobq._queue import connect_to_queue
 from pgjobq.api import OutgoingJob, Queue
@@ -19,4 +19,5 @@ __all__ = (
     "Queue",
     "OutgoingJob",
     "Attribute",
+    "JobIdIn",
 )
