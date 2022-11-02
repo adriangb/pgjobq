@@ -50,18 +50,19 @@ async def publish_jobs(
         for idx in range(len(ids))
         for parent_id in jobs[idx].dependencies
     ]
-    res: Optional[int] = await conn.fetchval(  # type: ignore
-        get_queries()["publish"],
-        queue_name,
-        schedule_at,
-        ids,
-        [m.body for m in jobs],
-        [json_dumps(m.attributes) for m in jobs],
-        [dep[0] for dep in deps],  # child_id
-        [dep[1] for dep in deps],  # parent_id
-    )
-    if res is None:
-        raise QueueDoesNotExist(queue_name=queue_name)
+    try:
+        await conn.fetchrow(  # type: ignore
+            get_queries()["publish"],
+            queue_name,
+            schedule_at,
+            ids,
+            [m.body for m in jobs],
+            [json_dumps(m.attributes) for m in jobs],
+            [dep[0] for dep in deps],  # child_id
+            [dep[1] for dep in deps],  # parent_id
+        )
+    except asyncpg.InvalidParameterValueError as e:
+        raise QueueDoesNotExist(queue_name=queue_name) from e
 
 
 class JobRecord(TypedDict):
@@ -162,7 +163,10 @@ async def cleanup_dead_jobs(
     conn: PoolOrConnection,
     queue_name: str,
 ) -> None:
-    await conn.execute(  # type: ignore
-        get_queries()["cleanup"],
-        queue_name,
-    )
+    try:
+        await conn.execute(  # type: ignore
+            get_queries()["cleanup"],
+            queue_name,
+        )
+    except asyncpg.InvalidParameterValueError:
+        pass  # allow cleanup to start running before the queue exists

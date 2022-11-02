@@ -6,35 +6,45 @@ WITH queue_info AS (
         retention_period
     FROM pgjobq.queues
     WHERE name = $1
+), jobs_to_process AS (
+    SELECT
+        id
+    FROM pgjobq.jobs
+    WHERE (
+        queue_id = (SELECT id FROM queue_info)
+        AND
+        id = $2
+    )
 ), updated_jobs AS (
     UPDATE pgjobq.jobs
     -- make it available in the past to avoid race conditions with extending deadlines
     -- which check to make sure the job is still available before extending
     SET
         available_at = now() - '1 second'::interval
+    FROM jobs_to_process
     WHERE (
         queue_id = (SELECT id FROM queue_info)
         AND
-        id = $2
+        pgjobq.jobs.id = jobs_to_process.id
         AND
         delivery_attempts_remaining != 0
     )
     RETURNING
-        (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), '')) AS notified
+        (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), '0')) AS notified
 ), deleted_jobs AS (
     DELETE FROM pgjobq.jobs
+    USING jobs_to_process
     WHERE (
         queue_id = (SELECT id FROM queue_info)
         AND
-        id = $2
+        pgjobq.jobs.id = jobs_to_process.id
         AND
         delivery_attempts_remaining = 0
     )
     RETURNING
-        id,
-        queue_id,
-        body,
-        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
+        pgjobq.jobs.id,
+        pgjobq.jobs.queue_id,
+        pgjobq.jobs.body
 ), dlq_jobs AS (
     SELECT
         d.id AS id,
@@ -57,24 +67,25 @@ WITH queue_info AS (
             pgjobq.queue_links.child_id = pgjobq.queues.id
         )
     ) dlq ON true
-)
-INSERT INTO pgjobq.jobs(
-    queue_id,
-    id,
-    expires_at,
-    delivery_attempts_remaining,
-    available_at,
-    body
+), new_dlq_jobs AS (
+    INSERT INTO pgjobq.jobs(
+        queue_id,
+        id,
+        expires_at,
+        delivery_attempts_remaining,
+        available_at,
+        body
+    )
+    SELECT
+        queue_id,
+        id,
+        expires_at,
+        max_delivery_attempts,
+        now()::timestamp,
+        body
+    FROM dlq_jobs
 )
 SELECT
-    queue_id,
-    id,
-    expires_at,
-    max_delivery_attempts,
-    now()::timestamp,
-    body
-FROM dlq_jobs
-RETURNING
-    (SELECT notified FROM deleted_jobs) AS completed_notification,
-    (SELECT notified FROM updated_jobs) AS new_job_notification
+    (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg(id::text, ',')) FROM deleted_jobs) AS deleted_notify,
+    (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), (SELECT count(*)::text FROM deleted_jobs))) AS new_dlq_jobs_notify
 ;

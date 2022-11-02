@@ -46,7 +46,7 @@ class OutgoingJob:
     dependencies: Sequence[UUID] = ()
 
 
-@dataclass(frozen=True, **_DATACLASSES_KW)
+@dataclass(**_DATACLASSES_KW)
 class QueueStatistics:
     # total number of jobs currently in the queue
     jobs: int

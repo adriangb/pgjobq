@@ -8,8 +8,7 @@ WITH queue_info AS (
     WHERE name = $1
 ), selected_jobs AS (
     SELECT
-        id,
-        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
+        id
     FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
@@ -17,11 +16,16 @@ WITH queue_info AS (
     )
     ORDER BY id
     FOR UPDATE
+), deleted_jobs AS (
+    DELETE FROM pgjobq.jobs
+    USING selected_jobs
+    WHERE (
+        pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
+        AND
+        pgjobq.jobs.id = selected_jobs.id
+    )
 )
-DELETE FROM pgjobq.jobs
-USING selected_jobs
-WHERE (
-    pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
-    AND
-    pgjobq.jobs.id = selected_jobs.id
-);
+SELECT
+    pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg(id::text, ','))
+FROM selected_jobs
+;

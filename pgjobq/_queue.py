@@ -156,6 +156,7 @@ class Queue(AbstractQueue):
     completion_callbacks: Dict[UUID, Set[anyio.Event]]
     new_job_callbacks: Set[Callable[[], None]]
     in_flight_jobs: Dict[UUID, Set[JobManager]]
+    _statistics: Optional[QueueStatistics] = None
 
     @asynccontextmanager
     async def receive(
@@ -349,11 +350,16 @@ class Queue(AbstractQueue):
 
         return cm()
 
+    async def _get_statistics(self) -> QueueStatistics:
+        if self._statistics is None:
+            record = await get_statistics(self.pool, self.queue_name)
+            self._statistics = QueueStatistics(
+                jobs=record["jobs"],
+            )
+        return self._statistics
+
     async def get_statistics(self) -> QueueStatistics:
-        record = await get_statistics(self.pool, self.queue_name)
-        return QueueStatistics(
-            jobs=record["jobs"],
-        )
+        return await self._get_statistics()
 
 
 @asynccontextmanager
@@ -377,6 +383,14 @@ async def connect_to_queue(
     new_job_callbacks: Set[Callable[[], None]] = set()
     checked_out_jobs: Dict[UUID, Set[JobManager]] = {}
 
+    queue = Queue(
+        pool=pool,
+        queue_name=queue_name,
+        completion_callbacks=completion_callbacks,
+        new_job_callbacks=new_job_callbacks,
+        in_flight_jobs=checked_out_jobs,
+    )
+
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
             await cleanup_dead_jobs(conn, queue_name)
@@ -398,11 +412,16 @@ async def connect_to_queue(
         channel: str,
         payload: str,
     ) -> None:
-        job_id = payload
-        job_id_key = UUID(job_id)
-        events = completion_callbacks.get(job_id_key, None) or ()
-        for event in events:
-            event.set()
+        if not payload:
+            return
+        job_ids = payload.split(",")
+        if queue._statistics is not None:  # type: ignore
+            queue._statistics.jobs -= len(job_ids)  # type: ignore
+        for job_id in job_ids:
+            job_id_key = UUID(job_id)
+            events = completion_callbacks.get(job_id_key, None) or ()
+            for event in events:
+                event.set()
 
     def process_new_job_notification(
         conn: asyncpg.Connection,
@@ -410,6 +429,9 @@ async def connect_to_queue(
         channel: str,
         payload: str,
     ) -> None:
+        n = int(payload)
+        if queue._statistics is not None:  # type: ignore
+            queue._statistics.jobs += n  # type: ignore
         for cb in new_job_callbacks:
             cb()
 
@@ -440,13 +462,6 @@ async def connect_to_queue(
             tg.start_soon(run_cleanup, cleanup_conn)
             tg.start_soon(extend_acks, ack_conn)
 
-            queue = Queue(
-                pool=pool,
-                queue_name=queue_name,
-                completion_callbacks=completion_callbacks,
-                new_job_callbacks=new_job_callbacks,
-                in_flight_jobs=checked_out_jobs,
-            )
             try:
                 yield queue
             finally:

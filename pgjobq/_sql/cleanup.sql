@@ -10,8 +10,7 @@ WITH queue_info AS (
     SELECT
         id,
         queue_id,
-        body,
-        (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text)) AS notified
+        body
     FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
@@ -31,6 +30,7 @@ WITH queue_info AS (
         AND
         pgjobq.jobs.id = jobs_to_delete.id
     )
+    RETURNING pgjobq.jobs.id
 ), dlq_jobs AS (
     SELECT
         d.id AS id,
@@ -52,20 +52,26 @@ WITH queue_info AS (
         )
         WHERE pgjobq.queue_links.parent_id = d.queue_id
     ) dlq ON true
-)
-INSERT INTO pgjobq.jobs(
-    queue_id,
-    id,
-    expires_at,
-    delivery_attempts_remaining,
-    available_at,
-    body
+), inserted_dlq_jobs AS (
+    INSERT INTO pgjobq.jobs(
+        queue_id,
+        id,
+        expires_at,
+        delivery_attempts_remaining,
+        available_at,
+        body
+    )
+    SELECT
+        queue_id,
+        id,
+        expires_at,
+        max_delivery_attempts,
+        now()::timestamp,
+        body
+    FROM dlq_jobs
+    RETURNING id
 )
 SELECT
-    queue_id,
-    id,
-    expires_at,
-    max_delivery_attempts,
-    now()::timestamp,
-    body
-FROM dlq_jobs;
+    (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg((SELECT id::text FROM deleted_jobs), ','))) AS deleted_notify,
+    (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), (SELECT count(*) FROM inserted_dlq_jobs)::text)) AS new_dlq_notify
+;

@@ -13,4 +13,4 @@ WHERE (
     pgjobq.jobs.id = $2
 )
 RETURNING
-    pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), (SELECT id)::text) AS notified;
+    pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), id::text) AS notified;
