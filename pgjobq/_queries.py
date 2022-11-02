@@ -27,7 +27,7 @@ class QueueDoesNotExist(LookupError):
         super().__init__(f"Queue not found: there is no queue named {queue_name}")
 
 
-@lru_cache
+@lru_cache(None)
 def get_queries() -> Dict[str, str]:
     res: Dict[str, str] = {}
     for file in (Path(__file__).parent / "_sql").glob("*.sql"):
