@@ -86,6 +86,14 @@ async def nack_message(
     await conn.execute(get_queries()["nack"], queue_name, message_id)  # type: ignore
 
 
+async def cancel_messages(
+    conn: PoolOrConnection,
+    queue_name: str,
+    ids: List[UUID],
+) -> None:
+    await conn.execute(get_queries()["cancel"], queue_name, ids)  # type: ignore
+
+
 async def extend_ack_deadlines(
     conn: PoolOrConnection,
     queue_name: str,

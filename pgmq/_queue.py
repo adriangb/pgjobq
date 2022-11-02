@@ -26,6 +26,7 @@ from anyio.abc import TaskGroup
 
 from pgmq._queries import (
     ack_message,
+    cancel_messages,
     cleanup_dead_messages,
     extend_ack_deadlines,
     get_completed_messages,
@@ -249,9 +250,7 @@ class Queue(AbstractQueue):
         return cm()
 
     async def cancel(self, message: UUID, *messages: UUID) -> None:
-        conn: asyncpg.Connection
-        async with self.pool.acquire() as conn:  # type: ignore
-            await ack_message(conn, self.queue_name, message, *messages)
+        await cancel_messages(self.pool, self.queue_name, [message, *messages])
 
     def wait_for_completion(
         self,
