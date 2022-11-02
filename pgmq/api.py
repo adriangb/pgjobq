@@ -20,8 +20,6 @@ if sys.version_info < (3, 8):  # pragma: no cover
 else:
     from typing import Protocol
 
-import anyio
-
 _DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
     _DATACLASSES_KW["slots"] = True
@@ -44,9 +42,14 @@ class MessageHandle(Protocol):
         ...
 
 
+class CompletionEvent(Protocol):
+    async def wait(self) -> None:
+        ...
+
+
 class CompletionHandle(Protocol):
     @property
-    def messages(self) -> Mapping[UUID, anyio.Event]:
+    def messages(self) -> Mapping[UUID, CompletionEvent]:
         """Completion events for each published message"""
         ...
 
