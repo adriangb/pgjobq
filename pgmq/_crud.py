@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import enum
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Literal, Optional
+from typing import Optional
 
 import asyncpg  # type: ignore
 
@@ -73,17 +74,27 @@ ON CONFLICT DO NOTHING
 """
 
 
+class LinkType(enum.Enum):
+    dlq = enum.auto()
+
+
+def _link_type_to_str(link_type: LinkType) -> str:
+    if link_type is LinkType.dlq:
+        return "dlq"
+    raise NotImplementedError
+
+
 async def _link(
     conn: asyncpg.Connection,
     parent_queue_name: str,
     child_queue_name: str,
-    link_type: Literal["dlq"],
+    link_type: LinkType,
 ) -> None:
     await conn.fetchval(  # type: ignore
         LINK,
         parent_queue_name,
         child_queue_name,
-        link_type,
+        _link_type_to_str(link_type),
     )
 
 
@@ -115,9 +126,9 @@ async def create_queue(
                 options,
             )
             if dlq_options is not None:
-                dlq_name = f"{queue_name}_dlq"
+                dlq_name = f"dlq@{queue_name}"
                 await _create(
-                    f"{queue_name}_dlq",
+                    dlq_name,
                     conn,
                     dlq_options,
                 )
@@ -125,7 +136,7 @@ async def create_queue(
                     conn,
                     parent_queue_name=queue_name,
                     child_queue_name=dlq_name,
-                    link_type="dlq",
+                    link_type=LinkType.dlq,
                 )
         return created
 

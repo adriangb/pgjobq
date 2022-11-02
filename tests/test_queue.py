@@ -8,7 +8,7 @@ import asyncpg  # type: ignore
 import pytest
 from anyio.abc import TaskStatus
 
-from pgmq import Queue, connect_to_queue, create_queue
+from pgmq import Queue, connect_to_queue, create_queue, get_dlq_name
 from pgmq.api import MessageHandle, QueueStatistics
 
 
@@ -546,7 +546,7 @@ async def test_dlq_max_delivery_attempts_expired(
 
     received = False
 
-    async with connect_to_queue("test-queue_dlq", migrated_pool) as dlq:
+    async with connect_to_queue(get_dlq_name("test-queue"), migrated_pool) as dlq:
         async with dlq.receive() as message_handle_stream:
             async for message_handle in message_handle_stream:
                 async with message_handle.acquire() as _:
@@ -575,7 +575,7 @@ async def test_dlq_expiration(
 
     received = False
 
-    async with connect_to_queue("test-queue_dlq", migrated_pool) as dlq:
+    async with connect_to_queue(get_dlq_name("test-queue"), migrated_pool) as dlq:
         async with dlq.receive() as message_handle_stream:
             async for message_handle in message_handle_stream:
                 async with message_handle.acquire() as _:
