@@ -30,6 +30,7 @@ There are plenty of use cases for a persistent queue that do not require infinit
 * Exponential back off for retries
 
 Possible features:
+
 * Reply-to queues and response handling
 
 ## Examples
@@ -71,7 +72,7 @@ async def main() -> None:
 
             async with queue.send(b'{"foo":"bar"}') as completion_handle:
                 print("sent")
-                await completion_handle()
+                await completion_handle.wait()
                 print("completed")
                 tg.cancel_scope.cancel()
 
