@@ -3,38 +3,55 @@ WITH queue_info AS (
     SELECT
         id,
         ack_deadline,
-        max_delivery_attempts
+        max_delivery_attempts,
+        backoff_power_base
     FROM pgjobq.queues
     WHERE name = $1
 ), available_messsages AS (
     SELECT
         pgjobq.jobs.id,
         pgjobq.jobs.queue_id,
-        pgjobq.jobs.delivery_attempts_remaining
+        delivery_attempts + 1 AS delivery_attempts
     FROM pgjobq.jobs
     WHERE (
-        available_at < now()::timestamp
+        NOT EXISTS(
+            SELECT * FROM pgjobq.predecessors WHERE pgjobq.predecessors.parent_id = pgjobq.jobs.id
+        )
+        AND
+        pgjobq.jobs.available_at < now()::timestamp
         AND
         pgjobq.jobs.queue_id = (SELECT id FROM queue_info)
         AND
-        expires_at > now()::timestamp
-        AND
-        NOT EXISTS(SELECT * FROM pgjobq.predecessors WHERE parent_id = pgjobq.jobs.id)
+        pgjobq.jobs.expires_at > now()::timestamp
         {where}
     )
     ORDER BY id -- to avoid deadlocks under concurrency
     LIMIT $2
     FOR UPDATE SKIP LOCKED
+), available_messages_with_queue_info AS (
+    SELECT
+        available_messsages.id,
+        available_messsages.queue_id,
+        pgjobq.calc_next_available_at(
+            queue_info.ack_deadline,
+            queue_info.backoff_power_base,
+            available_messsages.delivery_attempts
+        ) AS next_available_at,
+        available_messsages.delivery_attempts AS delivery_attempts
+    FROM available_messsages
+    LEFT JOIN queue_info ON (
+        available_messsages.queue_id = queue_info.id
+    )
 )
 UPDATE pgjobq.jobs
 SET
-    available_at = now() + (SELECT ack_deadline FROM queue_info),
-    delivery_attempts_remaining = available_messsages.delivery_attempts_remaining - 1
-FROM available_messsages
+    available_at = available_messages_with_queue_info.next_available_at,
+    delivery_attempts = available_messages_with_queue_info.delivery_attempts
+FROM available_messages_with_queue_info
 WHERE (
-    pgjobq.jobs.queue_id = available_messsages.queue_id
+    pgjobq.jobs.queue_id = available_messages_with_queue_info.queue_id
     AND
-    pgjobq.jobs.id = available_messsages.id
+    pgjobq.jobs.id = available_messages_with_queue_info.id
 )
 RETURNING
     pgjobq.jobs.id,

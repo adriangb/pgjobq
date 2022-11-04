@@ -27,10 +27,9 @@ There are plenty of use cases for a persistent queue that do not require infinit
 * Bulk sending and polling to support large workloads
 * Back pressure / bound queues
 * Fully typed async Python client (using [asyncpg])
+* Exponential back off for retries
 
 Possible features:
-
-* Exponential back off for retries
 * Reply-to queues and response handling
 
 ## Examples

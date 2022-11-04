@@ -21,7 +21,7 @@ from pgjobq.api import JobHandle, QueueStatistics
 
 @pytest.fixture
 async def queue(migrated_pool: asyncpg.Pool) -> AsyncGenerator[Queue, None]:
-    await create_queue("test-queue", migrated_pool)
+    await create_queue("test-queue", migrated_pool, ack_deadline=timedelta(seconds=1))
     async with connect_to_queue("test-queue", migrated_pool) as queue:
         yield queue
 
@@ -68,7 +68,7 @@ async def test_worker_raises_exception_in_job_handle(
                     raise MyException
 
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.75):  # redelivery should be immediate
+        with anyio.fail_after(2):  # redelivery should happen in ~1 sec
             job_handle = await job_handle_stream.receive()
         async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -90,7 +90,7 @@ async def test_worker_raises_exception_before_job_handle_is_entered(
                 raise MyException
 
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.75):  # redelivery should be immediate
+        with anyio.fail_after(2):  # redelivery should happen in ~1 sec
             job_handle = await job_handle_stream.receive()
         async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -112,7 +112,7 @@ async def test_worker_raises_exception_in_poll_with_pending_jobs(
             raise MyException
 
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.75):  # redelivery should be immediate
+        with anyio.fail_after(2):  # redelivery should happen in ~1 sec
             job_handle = await job_handle_stream.receive()
         async with job_handle.acquire() as job:
             assert job.body == b'{"foo":"bar"}', job.body
@@ -375,7 +375,7 @@ async def test_batched_rcv_can_be_interrupted(
     # we can immediately process the other job because it was nacked
     # when we exited the Queue.receive() context
     async with queue.receive() as job_handle_stream:
-        with anyio.fail_after(0.75):  # redelivery should be immediate
+        with anyio.fail_after(2):  # redelivery should happen in ~1 sec
             job_handle = await job_handle_stream.receive()
         async with job_handle.acquire() as job:
             assert job.body == b"{}", job.body
@@ -717,3 +717,48 @@ async def test_back_pressure(
                         pass
                     with anyio.fail_after(1):
                         await done.wait()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "backoff_power_base,expected_delays",
+    [
+        (1, [1, 1, 1]),
+        (2, [2, 4, 8]),
+    ],
+)
+async def test_redelivery_after_error(
+    migrated_pool: asyncpg.Pool,
+    backoff_power_base: float,
+    expected_delays: List[float],
+) -> None:
+    await create_queue(
+        "test-queue",
+        migrated_pool,
+        ack_deadline=timedelta(seconds=1),
+        backoff_power_base=backoff_power_base,
+    )
+
+    received_at: List[float] = []
+
+    class MyExc(Exception):
+        pass
+
+    async with connect_to_queue("test-queue", migrated_pool) as queue:
+        async with queue.send(b"1"):
+            pass
+        async with queue.receive(poll_interval=0) as job_handle_stream:
+            async for job_handle in job_handle_stream:
+                received_at.append(time())
+                try:
+                    async with job_handle.acquire() as _:
+                        if len(received_at) < len(expected_delays) + 1:
+                            raise MyExc
+                        else:
+                            break
+                except MyExc:
+                    pass
+
+    actual_delays = [cur - prev for cur, prev in zip(received_at[1:], received_at)]
+    # absolute tolerance of 1 sec because we purposefully introduce up to 1 sec of jitter
+    assert pytest.approx(expected_delays, abs=1) == actual_delays  # type: ignore

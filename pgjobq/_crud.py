@@ -16,6 +16,7 @@ class QueueOptions:
     ack_deadline: timedelta = timedelta(seconds=10)
     max_delivery_attempts: int = 10
     retention_period: timedelta = timedelta(days=7)
+    backoff_power_base: float = 1
     max_size: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -25,14 +26,16 @@ class QueueOptions:
             raise ValueError("Minimum delivery attempts is 1")
         if self.max_size is not None and self.max_size < 1:
             raise ValueError("Max size must be > 1")
+        if self.backoff_power_base < 1:
+            raise ValueError("Backoff exponent must be >= 1")
 
 
 DEFAULT_QUEUE_OPTIONS = QueueOptions()
 
 
 CREATE = """\
-INSERT INTO pgjobq.queues(name, ack_deadline, max_delivery_attempts, retention_period, max_size)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO pgjobq.queues(name, ack_deadline, max_delivery_attempts, retention_period, backoff_power_base, max_size)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT DO NOTHING
 RETURNING id;
 """
@@ -49,6 +52,7 @@ async def _create(
         options.ack_deadline,
         options.max_delivery_attempts,
         options.retention_period,
+        options.backoff_power_base,
         options.max_size,
     )
     return res is not None
@@ -110,6 +114,7 @@ async def create_queue(
     max_delivery_attempts: int = DEFAULT_QUEUE_OPTIONS.max_delivery_attempts,
     retention_period: timedelta = DEFAULT_QUEUE_OPTIONS.retention_period,
     max_size: Optional[int] = DEFAULT_QUEUE_OPTIONS.max_size,
+    backoff_power_base: float = DEFAULT_QUEUE_OPTIONS.backoff_power_base,
     dlq_options: Optional[QueueOptions] = QueueOptions(),
 ) -> bool:
     if not QUEUE_NAME_REGEX.match(queue_name):
@@ -122,6 +127,7 @@ async def create_queue(
         max_delivery_attempts=max_delivery_attempts,
         retention_period=retention_period,
         max_size=max_size,
+        backoff_power_base=backoff_power_base,
     )
     conn: asyncpg.Connection
     async with pool.acquire() as conn:  # type: ignore

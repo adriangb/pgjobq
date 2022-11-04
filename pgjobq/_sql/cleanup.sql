@@ -57,7 +57,7 @@ WITH queue_info AS (
         queue_id,
         id,
         expires_at,
-        delivery_attempts_remaining,
+        delivery_attempts,
         available_at,
         body
     )
@@ -65,7 +65,7 @@ WITH queue_info AS (
         queue_id,
         id,
         expires_at,
-        max_delivery_attempts,
+        0,
         now()::timestamp,
         body
     FROM dlq_jobs

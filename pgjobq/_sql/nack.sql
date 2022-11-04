@@ -15,22 +15,6 @@ WITH queue_info AS (
         AND
         id = $2
     )
-), updated_jobs AS (
-    UPDATE pgjobq.jobs
-    -- make it available in the past to avoid race conditions with extending deadlines
-    -- which check to make sure the job is still available before extending
-    SET
-        available_at = now() - '1 second'::interval
-    FROM jobs_to_process
-    WHERE (
-        queue_id = (SELECT id FROM queue_info)
-        AND
-        pgjobq.jobs.id = jobs_to_process.id
-        AND
-        delivery_attempts_remaining != 0
-    )
-    RETURNING
-        (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), '0')) AS notified
 ), deleted_jobs AS (
     DELETE FROM pgjobq.jobs
     USING jobs_to_process
@@ -39,7 +23,7 @@ WITH queue_info AS (
         AND
         pgjobq.jobs.id = jobs_to_process.id
         AND
-        delivery_attempts_remaining = 0
+        delivery_attempts >= (SELECT max_delivery_attempts FROM queue_info)
     )
     RETURNING
         pgjobq.jobs.id,
@@ -72,7 +56,7 @@ WITH queue_info AS (
         queue_id,
         id,
         expires_at,
-        delivery_attempts_remaining,
+        delivery_attempts,
         available_at,
         body
     )
@@ -80,7 +64,7 @@ WITH queue_info AS (
         queue_id,
         id,
         expires_at,
-        max_delivery_attempts,
+        0,
         now()::timestamp,
         body
     FROM dlq_jobs

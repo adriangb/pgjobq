@@ -17,7 +17,7 @@ WITH queue_info AS (
         queue_id,
         id,
         expires_at,
-        delivery_attempts_remaining,
+        delivery_attempts,
         available_at,
         body,
         attributes
@@ -26,7 +26,7 @@ WITH queue_info AS (
         queue_id,
         unnest($3::uuid[]),
         COALESCE($2, now()::timestamp) + retention_period,
-        max_delivery_attempts,
+        0,
         COALESCE($2, now()::timestamp),
         unnest($4::bytea[]),
         unnest($5::jsonb[])
