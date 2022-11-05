@@ -1,4 +1,5 @@
 from pgjobq._crud import create_queue, delete_queue
+from pgjobq._exceptions import JobDoesNotExist, QueueDoesNotExist, ReceiptHandleExpired
 from pgjobq._filters import Attribute, JobIdIn
 from pgjobq._migrations import migrate_to_latest_version
 from pgjobq._queue import connect_to_queue
@@ -20,4 +21,7 @@ __all__ = (
     "OutgoingJob",
     "Attribute",
     "JobIdIn",
+    "JobDoesNotExist",
+    "QueueDoesNotExist",
+    "ReceiptHandleExpired",
 )

@@ -15,16 +15,12 @@ else:
 
 import asyncpg  # type: ignore
 
+from pgjobq._exceptions import JobDoesNotExist, QueueDoesNotExist, ReceiptHandleExpired
 from pgjobq._filters import BaseClause
 from pgjobq.api import OutgoingJob
 
 PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
 Record = Mapping[str, Any]
-
-
-class QueueDoesNotExist(LookupError):
-    def __init__(self, *, queue_name: str) -> None:
-        super().__init__(f"Queue not found: there is no queue named {queue_name}")
 
 
 @lru_cache(None)
@@ -70,6 +66,7 @@ class JobRecord(TypedDict):
     body: bytes
     next_ack_deadline: datetime
     attributes: Optional[str]
+    receipt_handle: int
 
 
 async def poll_for_jobs(
@@ -90,20 +87,44 @@ async def poll_for_jobs(
     )
 
 
+class AckResult(TypedDict):
+    queue_exists: bool
+    job_exists: bool
+    receipt_handle_expired: bool
+
+
 async def ack_job(
     conn: PoolOrConnection,
     queue_name: str,
     job_id: UUID,
+    receipt_handle: int,
 ) -> None:
-    await conn.execute(get_queries()["ack"], queue_name, job_id)  # type: ignore
+    res: AckResult = await conn.fetchrow(  # type: ignore
+        get_queries()["ack"], queue_name, job_id, receipt_handle
+    )
+    if not res["queue_exists"]:
+        raise QueueDoesNotExist(queue_name=queue_name)
+    if not res["job_exists"]:
+        raise JobDoesNotExist(id=job_id)
+    if res["receipt_handle_expired"]:
+        raise ReceiptHandleExpired(receipt_handle=receipt_handle)
 
 
 async def nack_job(
     conn: PoolOrConnection,
     queue_name: str,
     job_id: UUID,
+    receipt_handle: int,
 ) -> None:
-    await conn.execute(get_queries()["nack"], queue_name, job_id)  # type: ignore
+    res: AckResult = await conn.fetchrow(  # type: ignore
+        get_queries()["nack"], queue_name, job_id, receipt_handle
+    )
+    if not res["queue_exists"]:
+        raise QueueDoesNotExist(queue_name=queue_name)
+    if not res["job_exists"]:
+        raise JobDoesNotExist(id=job_id)
+    if res["receipt_handle_expired"]:
+        raise ReceiptHandleExpired(receipt_handle=receipt_handle)
 
 
 async def cancel_jobs(
@@ -120,16 +141,28 @@ async def cancel_jobs(
     await conn.execute(query, *params)  # type: ignore
 
 
+class ExtendedAckRecord(TypedDict):
+    id: UUID
+    next_ack_deadline: datetime
+
+
 async def extend_ack_deadlines(
     conn: PoolOrConnection,
     queue_name: str,
-    job_ids: Sequence[UUID],
-) -> Optional[datetime]:
-    return await conn.fetchval(  # type: ignore
+    job_ids: List[UUID],
+    receipt_handles: List[int],
+) -> List[ExtendedAckRecord]:
+    if not job_ids:
+        return []
+    res: Optional[List[ExtendedAckRecord]] = await conn.fetchval(  # type: ignore
         get_queries()["heartbeat"],
         queue_name,
-        list(job_ids),
+        job_ids,
+        receipt_handles,
     )
+    if res is None:
+        raise Exception
+    return res
 
 
 class QueueStatisticsRecord(TypedDict):

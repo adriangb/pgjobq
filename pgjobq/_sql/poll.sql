@@ -1,4 +1,3 @@
--- Poll for new messasges and cleanup any expired jobs
 WITH queue_info AS (
     SELECT
         id,
@@ -45,8 +44,9 @@ WITH queue_info AS (
 )
 UPDATE pgjobq.jobs
 SET
-    available_at = available_messages_with_queue_info.next_available_at,
-    delivery_attempts = available_messages_with_queue_info.delivery_attempts
+    available_at      = available_messages_with_queue_info.next_available_at,
+    delivery_attempts = available_messages_with_queue_info.delivery_attempts,
+    receipt_handle    = nextval('pgjobq.receipt_handles')
 FROM available_messages_with_queue_info
 WHERE (
     pgjobq.jobs.queue_id = available_messages_with_queue_info.queue_id
@@ -55,7 +55,8 @@ WHERE (
 )
 RETURNING
     pgjobq.jobs.id,
-    available_at AS next_ack_deadline,
-    body,
+    pgjobq.jobs.available_at AS next_ack_deadline,
+    pgjobq.jobs.receipt_handle,
+    pgjobq.jobs.body,
     pgjobq.jobs.attributes
 ;

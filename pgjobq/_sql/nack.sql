@@ -6,15 +6,22 @@ WITH queue_info AS (
         retention_period
     FROM pgjobq.queues
     WHERE name = $1
-), jobs_to_process AS (
+), selected_jobs AS (
     SELECT
-        id
+        id,
+        receipt_handle
     FROM pgjobq.jobs
     WHERE (
         queue_id = (SELECT id FROM queue_info)
         AND
         id = $2
     )
+    ORDER BY id
+    FOR UPDATE
+), jobs_to_process AS (
+    SELECT id
+    FROM selected_jobs
+    WHERE receipt_handle = $3
 ), deleted_jobs AS (
     DELETE FROM pgjobq.jobs
     USING jobs_to_process
@@ -69,7 +76,12 @@ WITH queue_info AS (
         body
     FROM dlq_jobs
 )
+-- this select returns NULL if no jobs were found, which means either
+-- the owning queue was deleted or the job no longer belongs to this receiver
 SELECT
     (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg(id::text, ',')) FROM deleted_jobs) AS deleted_notify,
-    (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), (SELECT count(*)::text FROM deleted_jobs))) AS new_dlq_jobs_notify
-;
+    (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), (SELECT count(*)::text FROM deleted_jobs))) AS new_dlq_jobs_notify,
+    (SELECT EXISTS(SELECT * FROM queue_info)) AS queue_exists,
+    (SELECT EXISTS(SELECT * FROM selected_jobs)) AS job_exists,
+    (SELECT NOT EXISTS(SELECT * FROM jobs_to_process)) AS receipt_handle_expired
+FROM jobs_to_process;

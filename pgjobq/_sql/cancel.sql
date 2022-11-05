@@ -26,6 +26,6 @@ WITH queue_info AS (
     )
 )
 SELECT
-    pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg(id::text, ','))
+    pg_notify('pgjobq.job_completed_' || $1, string_agg(id::text, ','))
 FROM selected_jobs
 ;

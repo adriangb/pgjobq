@@ -26,6 +26,7 @@ import anyio
 import asyncpg  # type: ignore
 from anyio.abc import TaskGroup
 
+from pgjobq._exceptions import JobCancelledError
 from pgjobq._filters import BaseClause, JobIdIn
 from pgjobq._queries import (
     ack_job,
@@ -76,6 +77,7 @@ class JobManager:
     queue_name: str
     pending_jobs: Set[JobManager]
     queue: Queue
+    receipt_handle: int
     state: JobState = JobState.created
 
     @asynccontextmanager
@@ -94,24 +96,27 @@ class JobManager:
                 "Attempted to acquire a handle that is already being processed"
             )
         self.state = JobState.processing
-        state = JobState.succeeded
 
         async def listen_for_cancellation(tg: TaskGroup) -> None:
             async with self.queue.wait_for_completion(self.job.id) as handle:
                 await handle.wait()
                 tg.cancel_scope.cancel()
+                raise JobCancelledError(id=self.job.id)
 
         try:
             async with anyio.create_task_group() as tg:
                 tg.start_soon(listen_for_cancellation, tg)
                 yield self.job
                 tg.cancel_scope.cancel()
+            await self.shutdown(JobState.succeeded)
+        except JobCancelledError as e:
+            if e.id == self.job.id:
+                return
+            raise
         except Exception:
             # handle exceptions after entering the job's context manager
-            state = JobState.failed
+            await self.shutdown(JobState.failed)
             raise
-        finally:
-            await self.shutdown(state)
 
     async def shutdown(self, final_state: JobState) -> None:
         self.pending_jobs.discard(self)
@@ -125,12 +130,14 @@ class JobManager:
                         conn,
                         self.queue_name,
                         self.job.id,
+                        self.receipt_handle,
                     )
-                else:
+                elif final_state is JobState.failed:
                     await nack_job(
                         conn,
                         self.queue_name,
                         self.job.id,
+                        self.receipt_handle,
                     )
         finally:
             self.state = final_state
@@ -186,6 +193,8 @@ class Queue(AbstractQueue):
                         batch_size=batch_size,
                         filter=filter,
                     )
+                    if not jobs:
+                        return
                     managers = [
                         JobManager(
                             pool=self.pool,
@@ -201,6 +210,7 @@ class Queue(AbstractQueue):
                             queue_name=self.queue_name,
                             pending_jobs=in_flight_jobs,
                             queue=self,
+                            receipt_handle=job["receipt_handle"],
                         )
                         for job in jobs
                     ]
@@ -409,10 +419,14 @@ async def connect_to_queue(
     async def extend_acks(conn: asyncpg.Connection) -> None:
         while True:
             job_ids = [job.job.id for jobs in checked_out_jobs.values() for job in jobs]
+            receipt_handles = [
+                job.receipt_handle for jobs in checked_out_jobs.values() for job in jobs
+            ]
             await extend_ack_deadlines(
                 conn,
                 queue_name,
                 job_ids,
+                receipt_handles,
             )
             await anyio.sleep(0.5)  # less than the min ack deadline
 
