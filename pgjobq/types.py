@@ -1,5 +1,7 @@
 from __future__ import annotations
 
-import asyncpg  # type: ignore
+from typing import Union
 
-PoolOrConnection = asyncpg.Pool | asyncpg.Connection
+from asyncpg import Connection, Pool  # type: ignore
+
+PoolOrConnection = Union[Pool, Connection]
