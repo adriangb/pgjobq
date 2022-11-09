@@ -517,6 +517,15 @@ async def test_cancellation(
 
 
 @pytest.mark.anyio
+async def test_cancellation_bulk(
+    queue: Queue,
+) -> None:
+    # make sure we don't exceed the 8k character limit on NOTIFY payloads
+    async with queue.send(*(b"" for _ in range(2_000))) as handle:
+        await queue.cancel(*handle.jobs.keys())
+
+
+@pytest.mark.anyio
 async def test_cancellation_with_filter(
     queue: Queue,
 ) -> None:

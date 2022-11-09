@@ -5,7 +5,7 @@ from datetime import datetime
 from functools import lru_cache
 from json import dumps as json_dumps
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 from uuid import UUID
 
 if sys.version_info < (3, 8):  # pragma: no cover
@@ -17,9 +17,10 @@ import asyncpg  # type: ignore
 
 from pgjobq._exceptions import JobDoesNotExist, QueueDoesNotExist, ReceiptHandleExpired
 from pgjobq._filters import BaseClause
+from pgjobq._telemetry import TelemetryHook
 from pgjobq.api import OutgoingJob
+from pgjobq.types import PoolOrConnection
 
-PoolOrConnection = Union[asyncpg.Pool, asyncpg.Connection]
 Record = Mapping[str, Any]
 
 
@@ -39,6 +40,7 @@ async def publish_jobs(
     ids: List[UUID],
     jobs: List[OutgoingJob],
     schedule_at: Optional[datetime],
+    telemetry_hook: TelemetryHook,
 ) -> None:
     # (child_id, parent_id)
     deps = [
@@ -46,9 +48,10 @@ async def publish_jobs(
         for idx in range(len(ids))
         for parent_id in jobs[idx].dependencies
     ]
+    operation = "publish"
     try:
-        await conn.fetchrow(  # type: ignore
-            get_queries()["publish"],
+        query = get_queries()[operation]
+        args = (
             queue_name,
             schedule_at,
             ids,
@@ -57,6 +60,10 @@ async def publish_jobs(
             [dep[0] for dep in deps],  # child_id
             [dep[1] for dep in deps],  # parent_id
         )
+        async with telemetry_hook.on_query(
+            queue_name, operation, query, conn, args
+        ) as conn1:
+            await conn1.fetchrow(query, *args)  # type: ignore
     except asyncpg.InvalidParameterValueError as e:
         raise QueueDoesNotExist(queue_name=queue_name) from e
 
@@ -75,16 +82,19 @@ async def poll_for_jobs(
     queue_name: str,
     batch_size: int,
     filter: Optional[BaseClause],
+    telemetry_hook: TelemetryHook,
 ) -> Sequence[JobRecord]:
+    operation = "poll"
     params: List[Any] = [queue_name, batch_size]
     if filter:
         where = f"AND ({filter.get_value(params)})"
     else:
         where = ""
-    return await conn.fetch(  # type: ignore
-        get_queries()["poll"].format(where=where),
-        *params,
-    )
+    query = get_queries()[operation].format(where=where)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        return await conn1.fetch(query, *params)  # type: ignore
 
 
 class AckResult(TypedDict):
@@ -98,10 +108,15 @@ async def ack_job(
     queue_name: str,
     job_id: UUID,
     receipt_handle: int,
+    telemetry_hook: TelemetryHook,
 ) -> None:
-    res: AckResult = await conn.fetchrow(  # type: ignore
-        get_queries()["ack"], queue_name, job_id, receipt_handle
-    )
+    operation = "ack"
+    query = get_queries()[operation]
+    params = (queue_name, job_id, receipt_handle)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        res: AckResult = await conn1.fetchrow(query, *params)  # type: ignore
     if not res["queue_exists"]:
         raise QueueDoesNotExist(queue_name=queue_name)
     if not res["job_exists"]:
@@ -115,10 +130,15 @@ async def nack_job(
     queue_name: str,
     job_id: UUID,
     receipt_handle: int,
+    telemetry_hook: TelemetryHook,
 ) -> None:
-    res: AckResult = await conn.fetchrow(  # type: ignore
-        get_queries()["nack"], queue_name, job_id, receipt_handle
-    )
+    operation = "nack"
+    query = get_queries()[operation]
+    params = (queue_name, job_id, receipt_handle)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        res: AckResult = await conn1.fetchrow(query, *params)  # type: ignore
     if not res["queue_exists"]:
         raise QueueDoesNotExist(queue_name=queue_name)
     if not res["job_exists"]:
@@ -131,14 +151,19 @@ async def cancel_jobs(
     conn: PoolOrConnection,
     queue_name: str,
     filter: BaseClause,
+    telemetry_hook: TelemetryHook,
 ) -> None:
+    operation = "cancel"
     params = [queue_name]
     if filter:
         where = f"AND ({filter.get_value(params)})"
     else:
         where = ""
-    query = get_queries()["cancel"].format(where=where)
-    await conn.execute(query, *params)  # type: ignore
+    query = get_queries()[operation].format(where=where)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        await conn1.execute(query, *params)  # type: ignore
 
 
 class ExtendedAckRecord(TypedDict):
@@ -151,15 +176,17 @@ async def extend_ack_deadlines(
     queue_name: str,
     job_ids: List[UUID],
     receipt_handles: List[int],
+    telemetry_hook: TelemetryHook,
 ) -> List[ExtendedAckRecord]:
+    operation = "heartbeat"
     if not job_ids:
         return []
-    res: Optional[List[ExtendedAckRecord]] = await conn.fetchval(  # type: ignore
-        get_queries()["heartbeat"],
-        queue_name,
-        job_ids,
-        receipt_handles,
-    )
+    query = get_queries()[operation]
+    params = (queue_name, job_ids, receipt_handles)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        res: Optional[List[ExtendedAckRecord]] = await conn1.fetchval(query, *params)  # type: ignore
     if res is None:
         raise Exception
     return res
@@ -173,10 +200,15 @@ class QueueStatisticsRecord(TypedDict):
 async def get_statistics(
     conn: PoolOrConnection,
     queue_name: str,
+    telemetry_hook: TelemetryHook,
 ) -> QueueStatisticsRecord:
-    record: Optional[QueueStatisticsRecord] = await conn.fetchrow(  # type: ignore
-        get_queries()["statistics"], queue_name
-    )
+    operation = "statistics"
+    query = get_queries()[operation]
+    params = (queue_name,)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        record: Optional[QueueStatisticsRecord] = await conn1.fetchrow(query, *params)  # type: ignore
     if record is None:
         raise QueueDoesNotExist(queue_name=queue_name)
     return record
@@ -186,21 +218,30 @@ async def get_completed_jobs(
     conn: PoolOrConnection,
     queue_name: str,
     job_ids: List[UUID],
+    telemetry_hook: TelemetryHook,
 ) -> Sequence[UUID]:
-    records: List[Record] = await conn.fetch(  # type: ignore
-        get_queries()["gather_completed"], queue_name, job_ids
-    )
+    operation = "gather_completed"
+    query = get_queries()[operation]
+    params = (queue_name, job_ids)
+    async with telemetry_hook.on_query(
+        queue_name, operation, query, conn, params
+    ) as conn1:
+        records: List[Record] = await conn1.fetch(query, *params)  # type: ignore
     return [record["id"] for record in records]
 
 
 async def cleanup_dead_jobs(
     conn: PoolOrConnection,
     queue_name: str,
+    telemetry_hook: TelemetryHook,
 ) -> None:
     try:
-        await conn.execute(  # type: ignore
-            get_queries()["cleanup"],
-            queue_name,
-        )
+        operation = "cleanup"
+        query = get_queries()[operation]
+        params = (queue_name,)
+        async with telemetry_hook.on_query(
+            queue_name, operation, query, conn, params
+        ) as conn1:
+            await conn1.execute(query, *params)  # type: ignore
     except asyncpg.InvalidParameterValueError:
         pass  # allow cleanup to start running before the queue exists

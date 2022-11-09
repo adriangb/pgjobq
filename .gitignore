@@ -11,6 +11,7 @@
 !/README.md
 !/LICENSE.txt
 !/CODE_OF_CONDUCT.md
+!/benchmark
 
 **/__pycache__
 **/.DS_Store

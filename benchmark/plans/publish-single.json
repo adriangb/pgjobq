@@ -1,0 +1,306 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Result",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 8.47,
+      "Total Cost": 8.49,
+      "Plan Rows": 1,
+      "Plan Width": 4,
+      "Actual Startup Time": 0.477,
+      "Actual Total Time": 0.479,
+      "Actual Rows": 1,
+      "Actual Loops": 1,
+      "Output": ["pg_notify(('pgjobq.new_job_'::text || $6), ($7)::text)"],
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE queue_info",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "queues_name_key",
+          "Relation Name": "queues",
+          "Schema": "pgjobq",
+          "Alias": "queues",
+          "Startup Cost": 0.15,
+          "Total Cost": 8.17,
+          "Plan Rows": 1,
+          "Plan Width": 56,
+          "Actual Startup Time": 0.017,
+          "Actual Total Time": 0.019,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Output": [
+            "queues.name",
+            "queues.id",
+            "queues.max_delivery_attempts",
+            "queues.retention_period"
+          ],
+          "Index Cond": "(queues.name = 'test'::text)",
+          "Rows Removed by Index Recheck": 0
+        },
+        {
+          "Node Type": "ModifyTable",
+          "Operation": "Insert",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE dependencies",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "predecessors",
+          "Schema": "pgjobq",
+          "Alias": "predecessors",
+          "Startup Cost": 0.02,
+          "Total Cost": 0.19,
+          "Plan Rows": 0,
+          "Plan Width": 0,
+          "Actual Startup Time": 0.077,
+          "Actual Total Time": 0.077,
+          "Actual Rows": 0,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "ProjectSet",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0.02,
+              "Total Cost": 0.09,
+              "Plan Rows": 10,
+              "Plan Width": 36,
+              "Actual Startup Time": 0.002,
+              "Actual Total Time": 0.005,
+              "Actual Rows": 10,
+              "Actual Loops": 1,
+              "Output": [
+                "$1",
+                "unnest('{a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5,a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5}'::uuid[])",
+                "unnest('{8e783241-2415-479e-b884-a01ec8488fd3,6d43d487-c795-4808-ac0d-1e14de5883b7,cd8d9176-6ecc-4f3a-8bda-8d25f83aafc5,5bebba74-514f-4e81-86d4-9f2b98c3ca38,ba8459ec-c83f-4109-8f07-651c30ac879a,f550cbb4-62ef-47a9-855b-2bf6c5744d6c,dd0a4707-6886-40ff-96d2-dfa1a16df5d0,ec89b350-0183-45e5-96b4-e2da57c9a2f8,ccd29f98-4d90-43e1-9dc5-6f4e5aceca66,61f6dc05-ae30-4db4-bee8-411aacd1d0e3}'::uuid[])"
+              ],
+              "Plans": [
+                {
+                  "Node Type": "CTE Scan",
+                  "Parent Relationship": "InitPlan",
+                  "Subplan Name": "InitPlan 2 (returns $1)",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "CTE Name": "queue_info",
+                  "Alias": "queue_info",
+                  "Startup Cost": 0.0,
+                  "Total Cost": 0.02,
+                  "Plan Rows": 1,
+                  "Plan Width": 4,
+                  "Actual Startup Time": 0.001,
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Output": ["queue_info.queue_id"]
+                },
+                {
+                  "Node Type": "Result",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0.0,
+                  "Total Cost": 0.01,
+                  "Plan Rows": 1,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.0,
+                  "Actual Total Time": 0.0,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Node Type": "ModifyTable",
+          "Operation": "Insert",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE new_messages",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "jobs",
+          "Schema": "pgjobq",
+          "Alias": "jobs",
+          "Startup Cost": 0.0,
+          "Total Cost": 0.06,
+          "Plan Rows": 1,
+          "Plan Width": 112,
+          "Actual Startup Time": 0.44,
+          "Actual Total Time": 0.444,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Output": ["jobs.id"],
+          "Plans": [
+            {
+              "Node Type": "Subquery Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Alias": "*SELECT*",
+              "Startup Cost": 0.0,
+              "Total Cost": 0.06,
+              "Plan Rows": 1,
+              "Plan Width": 112,
+              "Actual Startup Time": 0.395,
+              "Actual Total Time": 0.399,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Output": [
+                "\"*SELECT*\".queue_id",
+                "\"*SELECT*\".unnest",
+                "\"*SELECT*\".\"?column?\"",
+                "\"*SELECT*\".\"?column?_1\"",
+                "\"*SELECT*\".\"coalesce\"",
+                "NULL::bigint",
+                "\"*SELECT*\".unnest_1",
+                "\"*SELECT*\".unnest_2"
+              ],
+              "Plans": [
+                {
+                  "Node Type": "ProjectSet",
+                  "Parent Relationship": "Subquery",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0.0,
+                  "Total Cost": 0.05,
+                  "Plan Rows": 1,
+                  "Plan Width": 104,
+                  "Actual Startup Time": 0.394,
+                  "Actual Total Time": 0.398,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Output": [
+                    "queue_info_1.queue_id",
+                    "unnest('{a9ffed15-5f95-4ec5-98fe-bc1d4acac5e5}'::uuid[])",
+                    "(COALESCE((now())::timestamp without time zone) + queue_info_1.retention_period)",
+                    "0",
+                    "COALESCE((now())::timestamp without time zone)",
+                    "unnest('{\"\\\\x7b226964223a307d\"}'::bytea[])",
+                    "unnest('{\"{\\\"id\\\": 0}\"}'::jsonb[])"
+                  ],
+                  "Plans": [
+                    {
+                      "Node Type": "CTE Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "CTE Name": "queue_info",
+                      "Alias": "queue_info_1",
+                      "Startup Cost": 0.0,
+                      "Total Cost": 0.02,
+                      "Plan Rows": 1,
+                      "Plan Width": 20,
+                      "Actual Startup Time": 0.0,
+                      "Actual Total Time": 0.001,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Output": [
+                        "queue_info_1.name",
+                        "queue_info_1.queue_id",
+                        "queue_info_1.max_delivery_attempts",
+                        "queue_info_1.retention_period"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Node Type": "CTE Scan",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "InitPlan 5 (returns $6)",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "CTE Name": "queue_info",
+          "Alias": "queue_info_2",
+          "Startup Cost": 0.0,
+          "Total Cost": 0.02,
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Actual Startup Time": 0.021,
+          "Actual Total Time": 0.023,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Output": ["queue_info_2.name"]
+        },
+        {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "InitPlan 6 (returns $7)",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.02,
+          "Total Cost": 0.03,
+          "Plan Rows": 1,
+          "Plan Width": 8,
+          "Actual Startup Time": 0.449,
+          "Actual Total Time": 0.449,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Output": ["count(*)"],
+          "Plans": [
+            {
+              "Node Type": "CTE Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "CTE Name": "new_messages",
+              "Alias": "new_messages",
+              "Startup Cost": 0.0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 0,
+              "Actual Startup Time": 0.44,
+              "Actual Total Time": 0.445,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Output": ["new_messages.id"]
+            }
+          ]
+        }
+      ]
+    },
+    "Query Identifier": -3112039355592891765,
+    "Planning Time": 0.167,
+    "Triggers": [
+      {
+        "Trigger Name": "RI_ConstraintTrigger_c_20503",
+        "Constraint Name": "predecessors_queue_id_fkey",
+        "Relation": "predecessors",
+        "Time": 0.103,
+        "Calls": 10
+      },
+      {
+        "Trigger Name": "RI_ConstraintTrigger_c_20508",
+        "Constraint Name": "predecessors_queue_id_child_id_fkey",
+        "Relation": "predecessors",
+        "Time": 1.633,
+        "Calls": 10
+      },
+      {
+        "Trigger Name": "RI_ConstraintTrigger_c_20513",
+        "Constraint Name": "predecessors_queue_id_parent_id_fkey",
+        "Relation": "predecessors",
+        "Time": 0.547,
+        "Calls": 10
+      },
+      {
+        "Trigger Name": "RI_ConstraintTrigger_c_20576",
+        "Constraint Name": "jobs_queue_id_fkey",
+        "Relation": "jobs_1",
+        "Time": 0.04,
+        "Calls": 1
+      }
+    ],
+    "Execution Time": 2.963
+  }
+]

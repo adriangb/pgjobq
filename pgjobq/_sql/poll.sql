@@ -14,7 +14,11 @@ WITH queue_info AS (
     FROM pgjobq.jobs
     WHERE (
         NOT EXISTS(
-            SELECT * FROM pgjobq.predecessors WHERE pgjobq.predecessors.parent_id = pgjobq.jobs.id
+            SELECT * FROM pgjobq.predecessors WHERE (
+                pgjobq.predecessors.parent_id = pgjobq.jobs.id
+                AND
+                pgjobq.predecessors.queue_id = (SELECT id FROM queue_info)
+            )
         )
         AND
         pgjobq.jobs.available_at < now()::timestamp

@@ -1,0 +1,588 @@
+[
+  {
+    "Plan": {
+      "Node Type": "ModifyTable",
+      "Operation": "Update",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "jobs",
+      "Schema": "pgjobq",
+      "Alias": "jobs",
+      "Startup Cost": 927.98,
+      "Total Cost": 1280.26,
+      "Plan Rows": 52,
+      "Plan Width": 126,
+      "Actual Startup Time": 298.459,
+      "Actual Total Time": 323.011,
+      "Actual Rows": 1000,
+      "Actual Loops": 1,
+      "Output": [
+        "jobs_1.id",
+        "jobs_1.available_at",
+        "jobs_1.receipt_handle",
+        "jobs_1.body",
+        "jobs_1.attributes"
+      ],
+      "Target Tables": [
+        { "Relation Name": "jobs_1", "Schema": "pgjobq", "Alias": "jobs_1" },
+        { "Relation Name": "jobs_2", "Schema": "pgjobq", "Alias": "jobs_2" }
+      ],
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE queue_info",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "queues_name_key",
+          "Relation Name": "queues",
+          "Schema": "pgjobq",
+          "Alias": "queues",
+          "Startup Cost": 0.15,
+          "Total Cost": 8.17,
+          "Plan Rows": 1,
+          "Plan Width": 28,
+          "Actual Startup Time": 0.007,
+          "Actual Total Time": 0.008,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Output": [
+            "queues.id",
+            "queues.ack_deadline",
+            "queues.max_delivery_attempts",
+            "queues.backoff_power_base"
+          ],
+          "Index Cond": "(queues.name = 'test'::text)",
+          "Rows Removed by Index Recheck": 0
+        },
+        {
+          "Node Type": "Limit",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE available_messsages",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 915.05,
+          "Total Cost": 915.35,
+          "Plan Rows": 24,
+          "Plan Width": 40,
+          "Actual Startup Time": 296.423,
+          "Actual Total Time": 298.191,
+          "Actual Rows": 1000,
+          "Actual Loops": 1,
+          "Output": [
+            "jobs_3.id",
+            "jobs_3.queue_id",
+            "((jobs_3.delivery_attempts + 1))",
+            "jobs_3.ctid",
+            "predecessors.ctid",
+            "jobs_3.tableoid"
+          ],
+          "Plans": [
+            {
+              "Node Type": "CTE Scan",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 2 (returns $1)",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "CTE Name": "queue_info",
+              "Alias": "queue_info_1",
+              "Startup Cost": 0.0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 4,
+              "Actual Startup Time": 0.01,
+              "Actual Total Time": 0.011,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Output": ["queue_info_1.id"]
+            },
+            {
+              "Node Type": "CTE Scan",
+              "Parent Relationship": "InitPlan",
+              "Subplan Name": "InitPlan 3 (returns $2)",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "CTE Name": "queue_info",
+              "Alias": "queue_info_2",
+              "Startup Cost": 0.0,
+              "Total Cost": 0.02,
+              "Plan Rows": 1,
+              "Plan Width": 4,
+              "Actual Startup Time": 0.002,
+              "Actual Total Time": 0.002,
+              "Actual Rows": 1,
+              "Actual Loops": 1,
+              "Output": ["queue_info_2.id"]
+            },
+            {
+              "Node Type": "LockRows",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 915.01,
+              "Total Cost": 915.31,
+              "Plan Rows": 24,
+              "Plan Width": 40,
+              "Actual Startup Time": 296.422,
+              "Actual Total Time": 298.089,
+              "Actual Rows": 1000,
+              "Actual Loops": 1,
+              "Output": [
+                "jobs_3.id",
+                "jobs_3.queue_id",
+                "((jobs_3.delivery_attempts + 1))",
+                "jobs_3.ctid",
+                "predecessors.ctid",
+                "jobs_3.tableoid"
+              ],
+              "Plans": [
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 915.01,
+                  "Total Cost": 915.07,
+                  "Plan Rows": 24,
+                  "Plan Width": 40,
+                  "Actual Startup Time": 296.401,
+                  "Actual Total Time": 296.682,
+                  "Actual Rows": 1000,
+                  "Actual Loops": 1,
+                  "Output": [
+                    "jobs_3.id",
+                    "jobs_3.queue_id",
+                    "((jobs_3.delivery_attempts + 1))",
+                    "jobs_3.ctid",
+                    "predecessors.ctid",
+                    "jobs_3.tableoid"
+                  ],
+                  "Sort Key": ["jobs_3.id"],
+                  "Sort Method": "quicksort",
+                  "Sort Space Used": 9625,
+                  "Sort Space Type": "Memory",
+                  "Plans": [
+                    {
+                      "Node Type": "Nested Loop",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Join Type": "Anti",
+                      "Startup Cost": 423.81,
+                      "Total Cost": 914.46,
+                      "Plan Rows": 24,
+                      "Plan Width": 40,
+                      "Actual Startup Time": 9.512,
+                      "Actual Total Time": 258.26,
+                      "Actual Rows": 83867,
+                      "Actual Loops": 1,
+                      "Output": [
+                        "jobs_3.id",
+                        "jobs_3.queue_id",
+                        "(jobs_3.delivery_attempts + 1)",
+                        "jobs_3.ctid",
+                        "predecessors.ctid",
+                        "jobs_3.tableoid"
+                      ],
+                      "Inner Unique": false,
+                      "Plans": [
+                        {
+                          "Node Type": "Append",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Startup Cost": 423.52,
+                          "Total Cost": 602.53,
+                          "Plan Rows": 49,
+                          "Plan Width": 34,
+                          "Actual Startup Time": 9.491,
+                          "Actual Total Time": 44.353,
+                          "Actual Rows": 102000,
+                          "Actual Loops": 1,
+                          "Subplans Removed": 0,
+                          "Plans": [
+                            {
+                              "Node Type": "Bitmap Heap Scan",
+                              "Parent Relationship": "Member",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Relation Name": "jobs_1",
+                              "Schema": "pgjobq",
+                              "Alias": "jobs_4",
+                              "Startup Cost": 423.52,
+                              "Total Cost": 590.96,
+                              "Plan Rows": 48,
+                              "Plan Width": 34,
+                              "Actual Startup Time": 9.475,
+                              "Actual Total Time": 35.894,
+                              "Actual Rows": 102000,
+                              "Actual Loops": 1,
+                              "Output": [
+                                "jobs_4.id",
+                                "jobs_4.queue_id",
+                                "jobs_4.delivery_attempts",
+                                "jobs_4.ctid",
+                                "jobs_4.tableoid"
+                              ],
+                              "Recheck Cond": "((jobs_4.queue_id = $1) AND (jobs_4.available_at < (now())::timestamp without time zone) AND (jobs_4.expires_at > (now())::timestamp without time zone))",
+                              "Rows Removed by Index Recheck": 0,
+                              "Exact Heap Blocks": 1460,
+                              "Lossy Heap Blocks": 0,
+                              "Plans": [
+                                {
+                                  "Node Type": "BitmapAnd",
+                                  "Parent Relationship": "Outer",
+                                  "Parallel Aware": false,
+                                  "Async Capable": false,
+                                  "Startup Cost": 423.52,
+                                  "Total Cost": 423.52,
+                                  "Plan Rows": 48,
+                                  "Plan Width": 0,
+                                  "Actual Startup Time": 9.299,
+                                  "Actual Total Time": 9.301,
+                                  "Actual Rows": 0,
+                                  "Actual Loops": 1,
+                                  "Plans": [
+                                    {
+                                      "Node Type": "Bitmap Index Scan",
+                                      "Parent Relationship": "Member",
+                                      "Parallel Aware": false,
+                                      "Async Capable": false,
+                                      "Index Name": "jobs_1_pkey",
+                                      "Startup Cost": 0.0,
+                                      "Total Cost": 19.65,
+                                      "Plan Rows": 431,
+                                      "Plan Width": 0,
+                                      "Actual Startup Time": 6.421,
+                                      "Actual Total Time": 6.421,
+                                      "Actual Rows": 102002,
+                                      "Actual Loops": 1,
+                                      "Index Cond": "(jobs_4.queue_id = $1)"
+                                    },
+                                    {
+                                      "Node Type": "Bitmap Index Scan",
+                                      "Parent Relationship": "Member",
+                                      "Parallel Aware": false,
+                                      "Async Capable": false,
+                                      "Index Name": "jobs_1_available_at_expires_at_idx",
+                                      "Startup Cost": 0.0,
+                                      "Total Cost": 403.59,
+                                      "Plan Rows": 9576,
+                                      "Plan Width": 0,
+                                      "Actual Startup Time": 2.815,
+                                      "Actual Total Time": 2.815,
+                                      "Actual Rows": 104002,
+                                      "Actual Loops": 1,
+                                      "Index Cond": "((jobs_4.available_at < (now())::timestamp without time zone) AND (jobs_4.expires_at > (now())::timestamp without time zone))"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "Node Type": "Bitmap Heap Scan",
+                              "Parent Relationship": "Member",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Relation Name": "jobs_2",
+                              "Schema": "pgjobq",
+                              "Alias": "jobs_5",
+                              "Startup Cost": 4.17,
+                              "Total Cost": 11.33,
+                              "Plan Rows": 1,
+                              "Plan Width": 34,
+                              "Actual Startup Time": 0.0,
+                              "Actual Total Time": 0.0,
+                              "Actual Rows": 0,
+                              "Actual Loops": 0,
+                              "Output": [
+                                "jobs_5.id",
+                                "jobs_5.queue_id",
+                                "jobs_5.delivery_attempts",
+                                "jobs_5.ctid",
+                                "jobs_5.tableoid"
+                              ],
+                              "Recheck Cond": "(jobs_5.queue_id = $1)",
+                              "Rows Removed by Index Recheck": 0,
+                              "Filter": "((jobs_5.available_at < (now())::timestamp without time zone) AND (jobs_5.expires_at > (now())::timestamp without time zone))",
+                              "Rows Removed by Filter": 0,
+                              "Exact Heap Blocks": 0,
+                              "Lossy Heap Blocks": 0,
+                              "Plans": [
+                                {
+                                  "Node Type": "Bitmap Index Scan",
+                                  "Parent Relationship": "Outer",
+                                  "Parallel Aware": false,
+                                  "Async Capable": false,
+                                  "Index Name": "jobs_2_pkey",
+                                  "Startup Cost": 0.0,
+                                  "Total Cost": 4.17,
+                                  "Plan Rows": 3,
+                                  "Plan Width": 0,
+                                  "Actual Startup Time": 0.0,
+                                  "Actual Total Time": 0.0,
+                                  "Actual Rows": 0,
+                                  "Actual Loops": 0,
+                                  "Index Cond": "(jobs_5.queue_id = $1)"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "Node Type": "Index Scan",
+                          "Parent Relationship": "Inner",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Scan Direction": "Forward",
+                          "Index Name": "predecessors_pkey",
+                          "Relation Name": "predecessors",
+                          "Schema": "pgjobq",
+                          "Alias": "predecessors",
+                          "Startup Cost": 0.29,
+                          "Total Cost": 7.66,
+                          "Plan Rows": 1,
+                          "Plan Width": 22,
+                          "Actual Startup Time": 0.002,
+                          "Actual Total Time": 0.002,
+                          "Actual Rows": 0,
+                          "Actual Loops": 102000,
+                          "Output": [
+                            "predecessors.ctid",
+                            "predecessors.parent_id"
+                          ],
+                          "Index Cond": "((predecessors.queue_id = $2) AND (predecessors.parent_id = jobs_3.id))",
+                          "Rows Removed by Index Recheck": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Node Type": "Nested Loop",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Join Type": "Inner",
+          "Startup Cost": 4.46,
+          "Total Cost": 356.74,
+          "Plan Rows": 52,
+          "Plan Width": 126,
+          "Actual Startup Time": 298.381,
+          "Actual Total Time": 313.027,
+          "Actual Rows": 1000,
+          "Actual Loops": 1,
+          "Output": [
+            "available_messsages.delivery_attempts",
+            "pgjobq.calc_next_available_at(queue_info.ack_deadline, (queue_info.backoff_power_base)::double precision, available_messsages.delivery_attempts)",
+            "nextval('pgjobq.receipt_handles'::regclass)",
+            "available_messsages.*",
+            "queue_info.*",
+            "jobs.tableoid",
+            "jobs.ctid"
+          ],
+          "Inner Unique": false,
+          "Plans": [
+            {
+              "Node Type": "Hash Join",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Join Type": "Left",
+              "Startup Cost": 0.03,
+              "Total Cost": 0.61,
+              "Plan Rows": 24,
+              "Plan Width": 140,
+              "Actual Startup Time": 296.934,
+              "Actual Total Time": 299.663,
+              "Actual Rows": 1000,
+              "Actual Loops": 1,
+              "Output": [
+                "available_messsages.delivery_attempts",
+                "available_messsages.*",
+                "available_messsages.queue_id",
+                "available_messsages.id",
+                "queue_info.ack_deadline",
+                "queue_info.backoff_power_base",
+                "queue_info.*"
+              ],
+              "Inner Unique": false,
+              "Hash Cond": "(available_messsages.queue_id = queue_info.id)",
+              "Plans": [
+                {
+                  "Node Type": "CTE Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "CTE Name": "available_messsages",
+                  "Alias": "available_messsages",
+                  "Startup Cost": 0.0,
+                  "Total Cost": 0.48,
+                  "Plan Rows": 24,
+                  "Plan Width": 72,
+                  "Actual Startup Time": 296.433,
+                  "Actual Total Time": 298.754,
+                  "Actual Rows": 1000,
+                  "Actual Loops": 1,
+                  "Output": [
+                    "available_messsages.delivery_attempts",
+                    "available_messsages.*",
+                    "available_messsages.queue_id",
+                    "available_messsages.id"
+                  ]
+                },
+                {
+                  "Node Type": "Hash",
+                  "Parent Relationship": "Inner",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 0.02,
+                  "Total Cost": 0.02,
+                  "Plan Rows": 1,
+                  "Plan Width": 72,
+                  "Actual Startup Time": 0.486,
+                  "Actual Total Time": 0.487,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1,
+                  "Output": [
+                    "queue_info.ack_deadline",
+                    "queue_info.backoff_power_base",
+                    "queue_info.*",
+                    "queue_info.id"
+                  ],
+                  "Hash Buckets": 1024,
+                  "Original Hash Buckets": 1024,
+                  "Hash Batches": 1,
+                  "Original Hash Batches": 1,
+                  "Peak Memory Usage": 9,
+                  "Plans": [
+                    {
+                      "Node Type": "CTE Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "CTE Name": "queue_info",
+                      "Alias": "queue_info",
+                      "Startup Cost": 0.0,
+                      "Total Cost": 0.02,
+                      "Plan Rows": 1,
+                      "Plan Width": 72,
+                      "Actual Startup Time": 0.004,
+                      "Actual Total Time": 0.005,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1,
+                      "Output": [
+                        "queue_info.ack_deadline",
+                        "queue_info.backoff_power_base",
+                        "queue_info.*",
+                        "queue_info.id"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "Node Type": "Append",
+              "Parent Relationship": "Inner",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 4.43,
+              "Total Cost": 14.26,
+              "Plan Rows": 3,
+              "Plan Width": 30,
+              "Actual Startup Time": 0.004,
+              "Actual Total Time": 0.005,
+              "Actual Rows": 1,
+              "Actual Loops": 1000,
+              "Subplans Removed": 0,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Heap Scan",
+                  "Parent Relationship": "Member",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Relation Name": "jobs_1",
+                  "Schema": "pgjobq",
+                  "Alias": "jobs_1",
+                  "Startup Cost": 4.43,
+                  "Total Cost": 12.24,
+                  "Plan Rows": 2,
+                  "Plan Width": 30,
+                  "Actual Startup Time": 0.003,
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1000,
+                  "Output": [
+                    "jobs_1.queue_id",
+                    "jobs_1.id",
+                    "jobs_1.tableoid",
+                    "jobs_1.ctid"
+                  ],
+                  "Recheck Cond": "((jobs_1.queue_id = available_messsages.queue_id) AND (jobs_1.id = available_messsages.id))",
+                  "Rows Removed by Index Recheck": 0,
+                  "Exact Heap Blocks": 1000,
+                  "Lossy Heap Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Index Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Index Name": "jobs_1_pkey",
+                      "Startup Cost": 0.0,
+                      "Total Cost": 4.43,
+                      "Plan Rows": 2,
+                      "Plan Width": 0,
+                      "Actual Startup Time": 0.002,
+                      "Actual Total Time": 0.002,
+                      "Actual Rows": 1,
+                      "Actual Loops": 1000,
+                      "Index Cond": "((jobs_1.queue_id = available_messsages.queue_id) AND (jobs_1.id = available_messsages.id))"
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Member",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Scan Direction": "Forward",
+                  "Index Name": "jobs_2_pkey",
+                  "Relation Name": "jobs_2",
+                  "Schema": "pgjobq",
+                  "Alias": "jobs_2",
+                  "Startup Cost": 0.15,
+                  "Total Cost": 2.0,
+                  "Plan Rows": 1,
+                  "Plan Width": 30,
+                  "Actual Startup Time": 0.0,
+                  "Actual Total Time": 0.0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0,
+                  "Output": [
+                    "jobs_2.queue_id",
+                    "jobs_2.id",
+                    "jobs_2.tableoid",
+                    "jobs_2.ctid"
+                  ],
+                  "Index Cond": "((jobs_2.queue_id = available_messsages.queue_id) AND (jobs_2.id = available_messsages.id))",
+                  "Rows Removed by Index Recheck": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Query Identifier": 3942129430250504377,
+    "Planning Time": 0.545,
+    "Triggers": [],
+    "Execution Time": 323.25
+  }
+]
