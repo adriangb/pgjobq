@@ -30,6 +30,7 @@ WITH queue_info AS (
 -- this select returns NULL if no jobs were found, which means either
 -- the owning queue was deleted or the job no longer belongs to this receiver
 SELECT
+    -- TODO: make sure the payload is < 8,000 char if we do bulk acking at some point
     pg_notify('pgjobq.job_completed_' || $1, $2::text) AS notified,
     (SELECT EXISTS(SELECT * FROM queue_info)) AS queue_exists,
     (SELECT EXISTS(SELECT * FROM jobs_for_deletion)) AS job_exists,

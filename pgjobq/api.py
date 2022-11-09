@@ -24,6 +24,7 @@ else:
     from typing import Protocol
 
 from pgjobq._filters import BaseClause
+from pgjobq._telemetry import TelemetryHook
 
 _DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
@@ -93,6 +94,7 @@ class Queue(ABC):
         batch_size: int = 1,
         poll_interval: float = 1,
         filter: Optional[BaseClause] = None,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> AsyncContextManager[JobHandleStream]:
         """Poll for a batch of jobs.
 
@@ -123,6 +125,7 @@ class Queue(ABC):
         __body: bytes,
         *bodies: bytes,
         schedule_at: Optional[datetime] = ...,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         ...  # pragma: no cover
 
@@ -133,6 +136,7 @@ class Queue(ABC):
         __body: OutgoingJob,
         *bodies: OutgoingJob,
         schedule_at: Optional[datetime] = ...,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         ...  # pragma: no cover
 
@@ -142,6 +146,7 @@ class Queue(ABC):
         __body: Union[bytes, OutgoingJob],
         *bodies: Union[bytes, OutgoingJob],
         schedule_at: Optional[datetime] = ...,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Put jobs on the queue.
 
@@ -161,7 +166,8 @@ class Queue(ABC):
         self,
         job: UUID,
         *jobs: UUID,
-        poll_interval: timedelta = timedelta(seconds=10),
+        poll_interval: timedelta = ...,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> AsyncContextManager[CompletionHandle]:
         """Wait for a job or group of jobs to complete
 
@@ -179,6 +185,8 @@ class Queue(ABC):
     def cancel(
         self,
         __filter: BaseClause,
+        *,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> Awaitable[None]:
         ...
 
@@ -188,6 +196,7 @@ class Queue(ABC):
         self,
         __job: UUID,
         *jobs: UUID,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> Awaitable[None]:
         ...
 
@@ -196,6 +205,7 @@ class Queue(ABC):
         self,
         __job_or_filter: Union[UUID, BaseClause],
         *jobs: UUID,
+        telemetry_hook: Optional[TelemetryHook] = ...,
     ) -> Awaitable[None]:
         """Cancel in-flight jobs
 
@@ -205,7 +215,10 @@ class Queue(ABC):
         pass  # pragma: no cover
 
     @abstractmethod
-    async def get_statistics(self) -> QueueStatistics:
+    async def get_statistics(
+        self,
+        telemetry_hook: Optional[TelemetryHook] = ...,
+    ) -> QueueStatistics:
         """Gather statistics from the queue.
 
         Returns:
@@ -213,5 +226,8 @@ class Queue(ABC):
         """
         pass  # pragma: no cover
 
-    async def wait_if_full(self) -> None:
+    async def wait_if_full(
+        self,
+        telemetry_hook: Optional[TelemetryHook] = ...,
+    ) -> None:
         pass  # pragma: no cover

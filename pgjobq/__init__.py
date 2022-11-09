@@ -3,6 +3,7 @@ from pgjobq._exceptions import JobDoesNotExist, QueueDoesNotExist, ReceiptHandle
 from pgjobq._filters import Attribute, JobIdIn
 from pgjobq._migrations import migrate_to_latest_version
 from pgjobq._queue import connect_to_queue
+from pgjobq._telemetry import TelemetryHook
 from pgjobq.api import OutgoingJob, Queue
 
 
@@ -24,4 +25,5 @@ __all__ = (
     "JobDoesNotExist",
     "QueueDoesNotExist",
     "ReceiptHandleExpired",
+    "TelemetryHook",
 )

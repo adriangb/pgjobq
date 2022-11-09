@@ -87,7 +87,7 @@ class AttributeExistsClause(BaseClause):
         return f"{flip}( pgjobq.jobs.attributes ? '{self.attribute}')"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Attribute:
     attribute_name: str
 

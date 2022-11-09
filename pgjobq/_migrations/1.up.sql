@@ -71,9 +71,6 @@ create table pgjobq.queue_links(
     UNIQUE(parent_id, link_type_id, child_id)
 );
 
--- Index for ackinc/nacknig jobs within a partition
-CREATE INDEX "pgjobq.jobs_id_idx" ON pgjobq.jobs(id);
-
 -- Indexes for looking for expired jobs and available jobs
 CREATE INDEX "pgjobq.jobs_available_idx"
 ON pgjobq.jobs(available_at, expires_at);

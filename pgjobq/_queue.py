@@ -39,6 +39,7 @@ from pgjobq._queries import (
     poll_for_jobs,
     publish_jobs,
 )
+from pgjobq._telemetry import NoOpTelemetryHook, TelemetryHook
 from pgjobq.api import CompletionHandle as AbstractCompletionHandle
 from pgjobq.api import Job, JobHandle
 from pgjobq.api import JobHandleStream as AbstractJobHandleStream
@@ -49,6 +50,9 @@ from pgjobq.api import QueueStatistics
 DATACLASSES_KW: Dict[str, Any] = {}
 if sys.version_info >= (3, 10):  # pragma: no cover
     DATACLASSES_KW["slots"] = True
+
+
+NO_OP_TELEMETRY_HOOK = NoOpTelemetryHook()
 
 
 @dataclass(**DATACLASSES_KW, frozen=True)
@@ -78,7 +82,8 @@ class JobManager:
     pending_jobs: Set[JobManager]
     queue: Queue
     receipt_handle: int
-    state: JobState = JobState.created
+    state: JobState
+    telemetry_hook: TelemetryHook
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[Job]:
@@ -131,6 +136,7 @@ class JobManager:
                         self.queue_name,
                         self.job.id,
                         self.receipt_handle,
+                        telemetry_hook=self.telemetry_hook,
                     )
                 elif final_state is JobState.failed:
                     await nack_job(
@@ -138,6 +144,7 @@ class JobManager:
                         self.queue_name,
                         self.job.id,
                         self.receipt_handle,
+                        telemetry_hook=self.telemetry_hook,
                     )
         finally:
             self.state = final_state
@@ -165,6 +172,7 @@ class Queue(AbstractQueue):
     in_flight_jobs: Dict[UUID, Set[JobManager]]
     statistics_updated: anyio.Event
     statistics: Optional[QueueStatistics]
+    telemetry_hook: Optional[TelemetryHook]
 
     @asynccontextmanager
     async def receive(
@@ -173,7 +181,9 @@ class Queue(AbstractQueue):
         batch_size: int = 1,
         poll_interval: float = 1,
         filter: Optional[BaseClause] = None,
+        telemetry_hook: Optional[TelemetryHook] = None,
     ) -> AsyncIterator[AbstractJobHandleStream]:
+        hook = telemetry_hook or self.telemetry_hook or NO_OP_TELEMETRY_HOOK
 
         in_flight_jobs: Set[JobManager] = set()
         poll_id = uuid4()
@@ -192,6 +202,7 @@ class Queue(AbstractQueue):
                         queue_name=self.queue_name,
                         batch_size=batch_size,
                         filter=filter,
+                        telemetry_hook=hook,
                     )
                     if not jobs:
                         return
@@ -211,6 +222,8 @@ class Queue(AbstractQueue):
                             pending_jobs=in_flight_jobs,
                             queue=self,
                             receipt_handle=job["receipt_handle"],
+                            state=JobState.created,
+                            telemetry_hook=hook,
                         )
                         for job in jobs
                     ]
@@ -255,8 +268,10 @@ class Queue(AbstractQueue):
         job_or_body: Union[bytes, OutgoingJob],
         *jobs_or_bodies: Union[bytes, OutgoingJob],
         schedule_at: Optional[datetime] = None,
+        telemetry_hook: Optional[TelemetryHook] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
         jobs: List[OutgoingJob]
+        telemetry_hook = telemetry_hook or self.telemetry_hook or NO_OP_TELEMETRY_HOOK
         if isinstance(job_or_body, bytes):
             jobs = [
                 OutgoingJob(job_or_body),
@@ -271,6 +286,7 @@ class Queue(AbstractQueue):
             ids=ids,
             jobs=jobs,
             schedule_at=schedule_at,
+            telemetry_hook=telemetry_hook,
         )
 
         @asynccontextmanager
@@ -283,20 +299,31 @@ class Queue(AbstractQueue):
 
         return cm()
 
-    async def cancel(self, job_or_filter: Union[UUID, BaseClause], *jobs: UUID) -> None:
+    async def cancel(
+        self,
+        job_or_filter: Union[UUID, BaseClause],
+        *jobs: UUID,
+        telemetry_hook: Optional[TelemetryHook] = None,
+    ) -> None:
+        telemetry_hook = telemetry_hook or self.telemetry_hook or NO_OP_TELEMETRY_HOOK
         filter: BaseClause
         if isinstance(job_or_filter, UUID):
             filter = JobIdIn(ids=[job_or_filter, *jobs])
         else:
             filter = job_or_filter
-        await cancel_jobs(self.pool, self.queue_name, filter)
+        await cancel_jobs(
+            self.pool, self.queue_name, filter, telemetry_hook=telemetry_hook
+        )
 
     def wait_for_completion(
         self,
         job: UUID,
         *jobs: UUID,
         poll_interval: Optional[timedelta] = timedelta(seconds=10),
+        telemetry_hook: Optional[TelemetryHook] = None,
     ) -> AsyncContextManager[AbstractCompletionHandle]:
+        hook = telemetry_hook or self.telemetry_hook or NO_OP_TELEMETRY_HOOK
+
         @asynccontextmanager
         async def cm() -> AsyncIterator[AbstractCompletionHandle]:
             done_events = {id: anyio.Event() for id in (job, *jobs)}
@@ -337,6 +364,7 @@ class Queue(AbstractQueue):
                             self.pool,
                             self.queue_name,
                             job_ids=list(done_events.keys()),
+                            telemetry_hook=hook,
                         )
                         if completed_jobs:
                             new_completion.set()
@@ -361,19 +389,31 @@ class Queue(AbstractQueue):
 
         return cm()
 
-    async def _get_statistics(self) -> QueueStatistics:
+    async def _get_statistics(
+        self,
+        telemetry_hook: TelemetryHook,
+    ) -> QueueStatistics:
         if self.statistics is None:
-            record = await get_statistics(self.pool, self.queue_name)
+            record = await get_statistics(
+                self.pool, self.queue_name, telemetry_hook=telemetry_hook
+            )
             self.statistics = QueueStatistics(
                 jobs=record["jobs"],
                 max_size=record["max_size"],
             )
         return self.statistics
 
-    async def get_statistics(self) -> QueueStatistics:
-        return await self._get_statistics()
+    async def get_statistics(
+        self,
+        telemetry_hook: Optional[TelemetryHook] = None,
+    ) -> QueueStatistics:
+        hook = telemetry_hook or self.telemetry_hook or NO_OP_TELEMETRY_HOOK
+        return await self._get_statistics(hook)
 
-    async def wait_if_full(self) -> None:
+    async def wait_if_full(
+        self,
+        telemetry_hook: Optional[TelemetryHook] = None,
+    ) -> None:
         stats = await self.get_statistics()
         while stats.max_size is not None and stats.jobs >= stats.max_size:
             await self.statistics_updated.wait()
@@ -384,6 +424,7 @@ class Queue(AbstractQueue):
 async def connect_to_queue(
     queue_name: str,
     pool: asyncpg.Pool,
+    telemetry_hook: Optional[TelemetryHook] = None,
 ) -> AsyncIterator[AbstractQueue]:
     """Connect to an existing queue.
 
@@ -409,11 +450,13 @@ async def connect_to_queue(
         in_flight_jobs=checked_out_jobs,
         statistics_updated=anyio.Event(),
         statistics=None,
+        telemetry_hook=telemetry_hook,
     )
+    hook = telemetry_hook or NO_OP_TELEMETRY_HOOK
 
     async def run_cleanup(conn: asyncpg.Connection) -> None:
         while True:
-            await cleanup_dead_jobs(conn, queue_name)
+            await cleanup_dead_jobs(conn, queue_name, hook)
             await anyio.sleep(1)
 
     async def extend_acks(conn: asyncpg.Connection) -> None:
@@ -427,6 +470,7 @@ async def connect_to_queue(
                 queue_name,
                 job_ids,
                 receipt_handles,
+                hook,
             )
             await anyio.sleep(0.5)  # less than the min ack deadline
 

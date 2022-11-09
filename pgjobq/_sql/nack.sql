@@ -75,12 +75,32 @@ WITH queue_info AS (
         now()::timestamp,
         body
     FROM dlq_jobs
+), partitioned_completed_job_ids AS (
+    -- NOTIFY has a max payload length of 8000 chars
+    -- each id is a uuid of 36 characters, plus a comma, so 37
+    -- thus we can fit ~200 ids in each notification
+    SELECT
+        id,
+        row_number() OVER (ORDER BY 1) / 200 AS batch_group
+    FROM jobs_to_process
+), completed_notification_groups AS (
+    SELECT
+        string_agg(id::text, ',') AS ids,
+        (SELECT name FROM queue_info) AS queue_name
+    FROM partitioned_completed_job_ids
+    GROUP BY batch_group
+), deleted_notify AS (
+    SELECT pg_notify('pgjobq.job_completed_' || queue_name, ids) AS notification
+    FROM completed_notification_groups
+), new_dlq_notify AS (
+    SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), count(*)::text) AS notification
+    FROM deleted_jobs
 )
 -- this select returns NULL if no jobs were found, which means either
 -- the owning queue was deleted or the job no longer belongs to this receiver
 SELECT
-    (SELECT pg_notify('pgjobq.job_completed_' || (SELECT name FROM queue_info), string_agg(id::text, ',')) FROM deleted_jobs) AS deleted_notify,
-    (SELECT pg_notify('pgjobq.new_job_' || (SELECT name FROM queue_info), (SELECT count(*)::text FROM deleted_jobs))) AS new_dlq_jobs_notify,
+    (SELECT 1 FROM deleted_notify GROUP BY 1) AS deleted_notify,
+    (SELECT 1 FROM new_dlq_notify GROUP BY 1) AS new_dlq_jobs_notify,
     (SELECT EXISTS(SELECT * FROM queue_info)) AS queue_exists,
     (SELECT EXISTS(SELECT * FROM selected_jobs)) AS job_exists,
     (SELECT NOT EXISTS(SELECT * FROM jobs_to_process)) AS receipt_handle_expired
