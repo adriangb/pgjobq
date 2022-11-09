@@ -376,7 +376,7 @@ async def test_send_to_non_existent_queue_raises_exception(
     migrated_pool: asyncpg.Pool,
 ) -> None:
     async with connect_to_queue("test-queue", migrated_pool) as queue:
-        with pytest.raises(QueueDoesNotExist, match="Queue not found"):
+        with pytest.raises(QueueDoesNotExist, match="The queue .* does not exist"):
             async with queue.send(b'{"foo":"bar"}'):
                 pass
 

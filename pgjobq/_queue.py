@@ -101,7 +101,7 @@ class JobManager:
             async with self.queue.wait_for_completion(self.job.id) as handle:
                 await handle.wait()
                 tg.cancel_scope.cancel()
-                raise JobCancelledError(id=self.job.id)
+                raise JobCancelledError(job=self.job.id)
 
         try:
             async with anyio.create_task_group() as tg:
@@ -110,7 +110,7 @@ class JobManager:
                 tg.cancel_scope.cancel()
             await self.shutdown(JobState.succeeded)
         except JobCancelledError as e:
-            if e.id == self.job.id:
+            if e.job == self.job.id:
                 return
             raise
         except Exception:

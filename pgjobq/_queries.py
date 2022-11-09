@@ -105,7 +105,7 @@ async def ack_job(
     if not res["queue_exists"]:
         raise QueueDoesNotExist(queue_name=queue_name)
     if not res["job_exists"]:
-        raise JobDoesNotExist(id=job_id)
+        raise JobDoesNotExist(job=job_id)
     if res["receipt_handle_expired"]:
         raise ReceiptHandleExpired(receipt_handle=receipt_handle)
 
@@ -122,7 +122,7 @@ async def nack_job(
     if not res["queue_exists"]:
         raise QueueDoesNotExist(queue_name=queue_name)
     if not res["job_exists"]:
-        raise JobDoesNotExist(id=job_id)
+        raise JobDoesNotExist(job=job_id)
     if res["receipt_handle_expired"]:
         raise ReceiptHandleExpired(receipt_handle=receipt_handle)
 
