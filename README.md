@@ -9,9 +9,18 @@ At some point I may decide to support this long term (at which point this warnin
 
 ## Purpose
 
-Sometimes you have a Postgres database and need a queue.
-You could stand up more infrastructure (SQS, Redis, etc), or you could use your existing database.
-There are plenty of use cases for a persistent queue that do not require infinite scalability, snapshots or any of the other advanced features full fledged queues/event buses/job brokers have.
+Maybe you have a Postgres instance or expertiese and need a queue for some mid-volume stuff like sending out an email after someone creates an account.
+Or maybe you need feratures that dedicated queueing solutions like RabbitMQ don't provide such as:
+
+- Job cancellation
+- Guaranteed atomic at most once delivery
+- Backpressure
+- Dynamic filtering of jobs that you receive
+
+You might also want to be able to drop down into SQL to do bulk edits or submit jobs into a queue based on the results of another query.
+Either way, running your job queue on Postgres can give you all of this and then some.
+
+But you don't get something for nothing. Hosted solutions like Pub/Sub or SQS offer nearly infinite scalability and more tooling around replaying messages and such. RabbitMQ and similar provide more routing primitives. All of these provide higher throughput than you're likely to get from Postgres. You also now have to manage and tune a Postgres database, which may be just as hard if not harder than managing RabbitMQ if you don't have expertise in either.
 
 ## Features
 
@@ -33,6 +42,7 @@ There are plenty of use cases for a persistent queue that do not require infinit
 Possible features:
 
 * Reply-to queues and response handling
+* More advanced routing.
 
 ## Examples
 
