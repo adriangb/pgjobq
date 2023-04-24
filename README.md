@@ -6,6 +6,7 @@ A job queue built on top of Postgres.
 
 Please do not use this for anything other than experimentation or inspiration.
 At some point I may decide to support this long term (at which point this warning will be removed), but until then this is just a playground subject to breaking changes (including breaking schema changes).
+I know for a fact that at least queue backpressure blows up at scale high throughput, and there are probably other things that I just don't know about.
 
 ## Purpose
 
